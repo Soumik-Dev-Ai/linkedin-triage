@@ -1,0 +1,370 @@
+@import "tailwindcss";
+
+/* ─── Custom Theme Tokens ─── */
+@theme {
+  --color-glass-bg: oklch(0.2 0.05 280 / 0.25);
+  --color-glass-border: oklch(1 1 1 / 0.08);
+  --color-glass-hover: oklch(0.25 0.08 280 / 0.4);
+
+  --color-surface-primary: oklch(0.12 0.03 275);
+  --color-surface-secondary: oklch(0.16 0.04 275);
+  --color-surface-elevated: oklch(0.2 0.05 275);
+
+  --color-text-primary: oklch(0.96 0.01 270);
+  --color-text-secondary: oklch(0.75 0.03 270);
+  --color-text-muted: oklch(0.55 0.04 270);
+
+  /* New vibrant accents */
+  --color-accent-primary: oklch(0.7 0.2 290); /* Electric purple */
+  --color-accent-secondary: oklch(0.65 0.25 250); /* Neon blue */
+
+  --color-accent-candidate: oklch(0.75 0.15 165);
+  --color-accent-candidate-bg: oklch(0.75 0.15 165 / 0.15);
+  --color-accent-sales: oklch(0.7 0.18 45);
+  --color-accent-sales-bg: oklch(0.7 0.18 45 / 0.15);
+  --color-accent-irrelevant: oklch(0.6 0.1 280);
+  --color-accent-irrelevant-bg: oklch(0.6 0.1 280 / 0.15);
+
+  --color-danger: oklch(0.65 0.22 25);
+  --color-danger-hover: oklch(0.6 0.25 25);
+  --color-danger-bg: oklch(0.65 0.22 25 / 0.15);
+
+  --color-success: oklch(0.7 0.15 155);
+  --color-success-bg: oklch(0.7 0.15 155 / 0.15);
+}
+
+/* ─── Base Styles ─── */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  font-family: var(--font-inter, 'Inter', system-ui, -apple-system, sans-serif);
+  background-color: oklch(0.08 0.02 275); /* Darker, deeper base */
+  color: oklch(0.96 0.01 270);
+  min-height: 100vh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Noise overlay for the entire body */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 50; /* Above background, below content */
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+  opacity: 0.035; /* Very subtle grain */
+}
+
+/* ─── Scrollbar ─── */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: oklch(0.3 0.05 275);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.4 0.08 275);
+}
+
+/* ─── Premium Glass Panel ─── */
+.glass-panel {
+  position: relative;
+  background: linear-gradient(
+    145deg,
+    oklch(0.18 0.03 275 / 0.4),
+    oklch(0.12 0.02 275 / 0.2)
+  );
+  backdrop-filter: blur(28px) saturate(1.4);
+  -webkit-backdrop-filter: blur(28px) saturate(1.4);
+  border-radius: 20px;
+  box-shadow: 
+    0 4px 24px -1px oklch(0 0 0 / 0.5),
+    inset 0 1px 1px oklch(1 1 1 / 0.1);
+}
+
+/* Iridescent border effect */
+.glass-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(
+    135deg,
+    oklch(1 1 1 / 0.2) 0%,
+    oklch(1 1 1 / 0.02) 40%,
+    oklch(1 1 1 / 0.02) 60%,
+    oklch(0.6 0.25 250 / 0.3) 100% /* Subtle neon blue glow at bottom right */
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+.glass-panel-subtle {
+  background: oklch(0.15 0.02 275 / 0.25);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid oklch(1 1 1 / 0.05);
+  border-radius: 12px;
+}
+
+.glass-panel-hover {
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+.glass-panel-hover:hover {
+  transform: translateY(-2px);
+  background: linear-gradient(
+    145deg,
+    oklch(0.22 0.05 275 / 0.5),
+    oklch(0.16 0.04 275 / 0.3)
+  );
+  box-shadow: 
+    0 8px 32px -4px oklch(0 0 0 / 0.6),
+    0 0 20px -5px oklch(0.65 0.25 250 / 0.2), /* Neon glow */
+    inset 0 1px 1px oklch(1 1 1 / 0.15);
+}
+
+/* ─── Spotlight Hover Effect ─── */
+/* Applied to cards/buttons via React onMouseMove, or pure CSS fallback */
+.spotlight-wrapper {
+  position: relative;
+  overflow: hidden;
+}
+.spotlight-wrapper::after {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: radial-gradient(
+    600px circle at var(--mouse-x, 50%) var(--mouse-y, 50%), 
+    oklch(1 1 1 / 0.06),
+    transparent 40%
+  );
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+.spotlight-wrapper:hover::after {
+  opacity: 1;
+}
+
+/* ─── Tracked Headers ─── */
+.tracking-header {
+  font-weight: 500;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  color: oklch(0.6 0.05 280);
+}
+
+.tracking-header-lg {
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-size: 0.85rem;
+  color: oklch(0.8 0.05 280);
+  text-shadow: 0 0 10px oklch(0.8 0.05 280 / 0.2);
+}
+
+/* ─── Category Badges ─── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 8px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  backdrop-filter: blur(8px);
+}
+
+.badge-important {
+  background: oklch(0.7 0.15 30 / 0.15);
+  color: oklch(0.8 0.12 30);
+  border: 1px solid oklch(0.7 0.15 30 / 0.3);
+  box-shadow: 0 0 12px oklch(0.7 0.15 30 / 0.15);
+}
+.badge-candidate {
+  background: oklch(0.75 0.15 165 / 0.15);
+  color: oklch(0.85 0.12 165);
+  border: 1px solid oklch(0.75 0.15 165 / 0.3);
+  box-shadow: 0 0 12px oklch(0.75 0.15 165 / 0.15);
+}
+
+.badge-sales {
+  background: oklch(0.7 0.18 45 / 0.15);
+  color: oklch(0.8 0.15 45);
+  border: 1px solid oklch(0.7 0.18 45 / 0.3);
+  box-shadow: 0 0 12px oklch(0.7 0.18 45 / 0.15);
+}
+
+.badge-irrelevant {
+  background: oklch(0.6 0.1 280 / 0.15);
+  color: oklch(0.7 0.1 280);
+  border: 1px solid oklch(0.6 0.1 280 / 0.3);
+}
+
+/* ─── Pulse Indicator ─── */
+@keyframes pulse-ring {
+  0% { transform: scale(0.8); opacity: 1; }
+  100% { transform: scale(2.5); opacity: 0; }
+}
+
+.pulse-dot {
+  position: relative;
+}
+.pulse-dot::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  background: inherit;
+  animation: pulse-ring 2s cubic-bezier(0.2, 0, 0.4, 1) infinite;
+}
+
+/* ─── Subtle Glow ─── */
+.glow-border {
+  box-shadow:
+    0 0 0 1px oklch(1 1 1 / 0.1),
+    0 0 24px -5px oklch(0.7 0.2 290 / 0.25), /* Electric purple glow */
+    0 8px 32px -8px oklch(0 0 0 / 0.5);
+}
+
+/* ─── Kill Switch Button ─── */
+.kill-switch {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, oklch(0.65 0.22 25 / 0.15), oklch(0.55 0.25 25 / 0.1));
+  border: 1px solid oklch(0.65 0.22 25 / 0.3);
+  color: oklch(0.85 0.15 25);
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  backdrop-filter: blur(8px);
+}
+.kill-switch:hover {
+  background: linear-gradient(135deg, oklch(0.65 0.22 25 / 0.25), oklch(0.55 0.25 25 / 0.2));
+  border-color: oklch(0.65 0.22 25 / 0.5);
+  color: oklch(0.95 0.1 25);
+  box-shadow: 0 0 24px -4px oklch(0.65 0.22 25 / 0.4);
+  transform: translateY(-1px);
+}
+.kill-switch:active {
+  transform: scale(0.96);
+}
+
+/* ─── Connect Button ─── */
+.connect-button {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, oklch(0.7 0.2 290 / 0.6), oklch(0.65 0.25 250 / 0.5));
+  border: 1px solid oklch(1 1 1 / 0.2);
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  box-shadow: 
+    0 4px 15px -3px oklch(0.7 0.2 290 / 0.5),
+    inset 0 1px 1px oklch(1 1 1 / 0.4);
+  z-index: 50; /* Ensure button stays strictly on top of invisible overlays */
+}
+.connect-button:hover:not(:disabled) {
+  background: linear-gradient(135deg, oklch(0.75 0.2 290 / 0.7), oklch(0.7 0.25 250 / 0.6));
+  border-color: oklch(1 1 1 / 0.4);
+  box-shadow: 
+    0 8px 25px -4px oklch(0.7 0.2 290 / 0.6),
+    0 0 15px oklch(0.65 0.25 250 / 0.4),
+    inset 0 1px 2px oklch(1 1 1 / 0.6);
+  transform: translateY(-2px);
+}
+.connect-button:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+/* ─── Table Row Hover ─── */
+.log-row {
+  transition: all 0.3s ease;
+  border-radius: 12px;
+}
+.log-row:hover {
+  background: oklch(1 1 1 / 0.04);
+  transform: translateX(4px);
+}
+
+/* ─── Scan Line Effect ─── */
+@keyframes scan-line {
+  0% { top: -10%; opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { top: 110%; opacity: 0; }
+}
+
+.mask-gradient {
+  mask-image: linear-gradient(to bottom, black 50%, transparent 100%);
+}
+
+.liquid-glass {
+  background: rgba(0, 0, 0, 0.4);
+  background-blend-mode: luminosity;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  border: none;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.1);
+  position: relative;
+  overflow: hidden;
+}
+.liquid-glass::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.4px;
+  background: linear-gradient(180deg,
+    rgba(255,255,255,0.3) 0%, rgba(255,255,255,0.1) 20%,
+    rgba(255,255,255,0) 40%, rgba(255,255,255,0) 60%,
+    rgba(255,255,255,0.1) 80%, rgba(255,255,255,0.3) 100%);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+.scan-line::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, oklch(0.7 0.2 290 / 0.5), oklch(0.65 0.25 250 / 0.5), transparent);
+  box-shadow: 0 0 15px 2px oklch(0.7 0.2 290 / 0.3);
+  animation: scan-line 4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  z-index: 10;
+}
+
+/* ─── Stagger Fade Animations ─── */
+@keyframes fade-slide-up {
+  from { opacity: 0; transform: translateY(15px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-in {
+  animation: fade-slide-up 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+  opacity: 0;
+}
+/* Utility class for inline stagger delays */
+

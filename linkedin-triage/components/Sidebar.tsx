@@ -185,25 +185,7 @@ export default function Sidebar({
           </motion.div>
         )}
 
-        {!accountId && (
-          <button
-            onClick={onConnect}
-            disabled={isConnecting}
-            className="connect-button w-full mt-3 py-2.5 px-4 rounded-lg text-xs font-medium tracking-wide uppercase flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isConnecting ? (
-              <>
-                <Loader2 size={12} className="animate-spin" />
-                CONNECTING...
-              </>
-            ) : (
-              <>
-                <Radio size={12} />
-                CONNECT ACCOUNT
-              </>
-            )}
-          </button>
-        )}
+
       </div>
 
       {/* ─── Error Display ─── */}
@@ -378,7 +360,7 @@ export default function Sidebar({
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="glass-panel flex-1 min-h-[160px] max-h-[300px] flex flex-col p-0 overflow-hidden"
+          className="glass-panel flex-1 min-h-[350px] flex flex-col p-0 overflow-hidden mt-4"
         >
           <div className="flex items-center justify-between p-3 border-b border-white/5 bg-black/20">
             <h2 className="tracking-header flex items-center gap-2 m-0">
@@ -398,7 +380,7 @@ export default function Sidebar({
           </div>
           <div 
             ref={terminalScrollRef}
-            className="flex-1 overflow-y-auto p-3 space-y-1.5 text-[10px] font-mono leading-relaxed"
+            className="flex-1 overflow-y-auto p-4 space-y-2 text-[12px] font-mono leading-relaxed"
             style={{ 
               scrollbarWidth: 'thin',
               scrollbarColor: 'oklch(0.3 0 0) transparent'
@@ -442,22 +424,22 @@ export default function Sidebar({
           <button
             onClick={handleKillClick}
             disabled={isKilling}
-            className="kill-switch w-full py-3 px-4 rounded-lg text-xs font-semibold tracking-wider uppercase flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="kill-switch w-full py-3.5 px-4 rounded-lg text-xs font-bold tracking-wider uppercase flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
           >
             {isKilling ? (
               <>
                 <Loader2 size={13} className="animate-spin" />
-                REVOKING ACCESS...
+                DELETING DATA...
               </>
             ) : showConfirm ? (
               <>
                 <AlertTriangle size={13} />
-                CONFIRM REVOKE — CLICK AGAIN
+                CONFIRM DELETE — CLICK AGAIN
               </>
             ) : (
               <>
                 <ShieldOff size={13} />
-                END SESSION · REVOKE ACCESS
+                DELETE ALL DETAILS
               </>
             )}
           </button>

@@ -568,19 +568,70 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Activity Log */}
+          {/* Main Content Area */}
           {toastElement}
-          <ActivityLog 
-            entries={activeCategory === 'ALL' ? activityLog : activityLog.filter(e => e.category === activeCategory)} 
-            isPolling={isPolling} 
-            onSendDraft={handleSendDraft} 
-            onRowClick={setSelectedEntry}
-            safeMode={safeMode}
-            isDeveloper={isDeveloper}
-            onCategoryChange={(id, newCategory) => {
-              setActivityLog(prev => prev.map(e => e.id === id ? { ...e, category: newCategory as any } : e));
-            }}
-          />
+          
+          {accountId ? (
+            <ActivityLog 
+              entries={activeCategory === 'ALL' ? activityLog : activityLog.filter(e => e.category === activeCategory)} 
+              isPolling={isPolling} 
+              onSendDraft={handleSendDraft} 
+              onRowClick={setSelectedEntry}
+              safeMode={safeMode}
+              isDeveloper={isDeveloper}
+              onCategoryChange={(id, newCategory) => {
+                setActivityLog(prev => prev.map(e => e.id === id ? { ...e, category: newCategory as any } : e));
+              }}
+            />
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center p-8 relative">
+              <div className="absolute inset-0 bg-gradient-to-b from-transparent via-[#c77dff]/5 to-transparent pointer-events-none" />
+              
+              <div className="max-w-2xl w-full text-center space-y-8 relative z-10 -mt-16">
+                <AnimatedHeading 
+                  text="AI Inbox Triage"
+                  className="text-4xl md:text-6xl font-light mb-2 text-white"
+                  style={{ letterSpacing: '-0.04em' }}
+                />
+                <p className="text-zinc-400 text-sm md:text-base mb-8 max-w-xl mx-auto leading-relaxed">
+                  Seamlessly categorize and draft responses for your incoming communications.
+                </p>
+
+                <div className="relative inline-block group mt-8">
+                  <div className="absolute inset-0 bg-white/20 blur-2xl rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
+                  <button
+                    onClick={handleUseExistingAccount}
+                    disabled={isConnecting}
+                    className="relative bg-white text-black px-12 py-5 rounded-2xl text-xs font-bold tracking-[0.2em] uppercase hover:scale-105 hover:bg-zinc-100 active:scale-95 transition-all shadow-[0_0_40px_rgba(255,255,255,0.1)] flex items-center gap-4 disabled:opacity-50 disabled:cursor-not-allowed mx-auto"
+                  >
+                    {isConnecting ? (
+                      <>
+                        <Loader2 className="animate-spin w-5 h-5" />
+                        COLLECTING...
+                      </>
+                    ) : (
+                      <>
+                        COLLECT DETAILS
+                        <ExternalLink size={16} />
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <div className="mt-24 p-6 rounded-2xl bg-black/40 border border-white/5 backdrop-blur-md max-w-2xl mx-auto text-left flex gap-5 items-start shadow-2xl">
+                  <div className="p-3 bg-emerald-500/10 rounded-xl">
+                    <Shield size={24} className="text-emerald-400 flex-shrink-0" />
+                  </div>
+                  <div>
+                    <h3 className="text-emerald-400 font-bold tracking-widest text-[11px] mb-2">ZERO-RETENTION POLICY</h3>
+                    <p className="text-xs text-zinc-400 leading-relaxed">
+                      No data is stored. If you do not delete the data yourself, it will automatically get deleted as this extension strictly follows a zero retention policy. So no data is being stored.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </main>
       </div>
 
@@ -661,158 +712,6 @@ export default function Dashboard() {
         )}
       </AnimatePresence>
 
-      {/* ─── Connect Modal ─── */}
-      <AnimatePresence>
-        {showConnectModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] flex items-center justify-center p-4"
-            style={{ background: 'oklch(0 0 0 / 0.65)', backdropFilter: 'blur(12px)' }}
-            onClick={() => !isConnecting && setShowConnectModal(false)}
-          >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 12 }}
-              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-              className="glass-panel glass-panel-hover glow-border w-full max-w-md p-7"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Modal Header */}
-              <div className="flex items-center justify-between mb-8">
-                <div>
-                  <h3 className="text-base font-bold text-zinc-100 tracking-wide drop-shadow-md">
-                    Connect LinkedIn Account
-                  </h3>
-                  <p className="text-xs text-zinc-400 mt-1.5">
-                    Via Unipile hosted authentication
-                  </p>
-                </div>
-                <button
-                  onClick={() => { handleCancelAuth(); setShowConnectModal(false); }}
-                  className="w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center hover:bg-white/10 transition-all hover:scale-105 active:scale-95"
-                >
-                  <X size={14} className="text-zinc-300" />
-                </button>
-              </div>
-
-              {/* Connection Steps */}
-              <div className="space-y-5">
-                {/* Step Indicator */}
-                {connectStep !== 'idle' && (
-                  <div className="bg-zinc-900/60 border border-white/10 rounded-xl p-5 shadow-inner">
-                    <div className="flex items-center gap-4">
-                      {connectStep === 'polling' ? (
-                        <div className="relative">
-                          <RefreshCw size={18} className="text-[#c77dff] animate-spin" />
-                          <div className="absolute inset-0 bg-[#c77dff] blur-md opacity-40 rounded-full animate-pulse" />
-                        </div>
-                      ) : (
-                        <Loader2 size={18} className="text-zinc-400 animate-spin" />
-                      )}
-                      <div>
-                        <p className="text-xs text-zinc-200 font-semibold tracking-wide">
-                          {connectStep === 'opening' && 'Creating auth link...'}
-                          {connectStep === 'waiting' && 'Opening LinkedIn login...'}
-                          {connectStep === 'polling' && 'Waiting for authentication...'}
-                        </p>
-                        <p className="text-[11px] text-zinc-400 mt-1 leading-relaxed">
-                          {connectStep === 'polling'
-                            ? 'Complete the login in the new tab. This will auto-detect when done.'
-                            : 'Please wait...'}
-                        </p>
-                      </div>
-                    </div>
-                    {connectStep === 'polling' && (
-                      <button
-                        onClick={handleCancelAuth}
-                        className="mt-4 w-full py-2.5 px-4 rounded-lg text-[10px] font-bold tracking-widest uppercase bg-white/5 border border-white/10 text-zinc-400 hover:text-zinc-200 hover:bg-white/10 hover:border-white/20 transition-all active:scale-[0.98]"
-                      >
-                        CANCEL
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                {/* Option 1: Hosted Auth */}
-                {connectStep === 'idle' && (
-                  <>
-                    <button
-                      onClick={handleConnectViaAuth}
-                      disabled={isConnecting}
-                      className="connect-button w-full py-3.5 px-4 rounded-xl text-xs font-bold tracking-widest uppercase flex items-center justify-center gap-2.5 disabled:opacity-50"
-                    >
-                      <ExternalLink size={14} />
-                      CONNECT VIA LINKEDIN
-                    </button>
-
-                    {/* Option 1b: Use Existing Account */}
-                    <button
-                      onClick={handleUseExistingAccount}
-                      disabled={isConnecting}
-                      className="w-full py-3 px-4 rounded-xl text-xs font-bold tracking-widest uppercase bg-white/5 border border-white/10 text-zinc-300 hover:bg-white/10 hover:border-white/20 transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2.5 active:scale-[0.98]"
-                    >
-                      <RefreshCw size={13} />
-                      USE EXISTING ACCOUNT
-                    </button>
-
-                    {/* Divider */}
-                    <div className="flex items-center gap-4 py-1">
-                      <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
-                      <span className="text-[10px] font-bold tracking-[0.2em] text-zinc-500">
-                        OR ENTER MANUALLY
-                      </span>
-                      <div className="flex-1 h-px bg-gradient-to-l from-transparent via-white/10 to-transparent" />
-                    </div>
-
-                    {/* Option 2: Manual Account ID */}
-                    <div className="space-y-3">
-                      <input
-                        type="text"
-                        value={manualAccountId}
-                        onChange={(e) => setManualAccountId(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleManualConnect()}
-                        placeholder="Paste your Unipile account_id"
-                        className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3.5 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-[#9d4edd] focus:ring-1 focus:ring-[#9d4edd]/30 transition-all font-mono shadow-inner"
-                      />
-                      <button
-                        onClick={handleManualConnect}
-                        disabled={!manualAccountId.trim() || isConnecting}
-                        className="w-full py-3 px-4 rounded-xl text-xs font-bold tracking-widest uppercase bg-white/5 border border-white/10 text-zinc-400 hover:bg-white/10 hover:border-white/20 hover:text-zinc-200 transition-all disabled:opacity-30 disabled:cursor-not-allowed active:scale-[0.98]"
-                      >
-                        CONNECT WITH ACCOUNT ID
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {/* Error Display */}
-              <AnimatePresence>
-                {errorMessage && (
-                  <motion.div 
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0 }}
-                    className="mt-5 p-3.5 rounded-xl bg-red-500/10 border border-red-500/20 backdrop-blur-md"
-                  >
-                    <p className="text-xs text-red-400 font-medium">{errorMessage}</p>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {/* Privacy Note */}
-              <p className="text-[10px] text-zinc-500 text-center mt-6 leading-relaxed font-medium">
-                Your credentials are processed by Unipile&apos;s secure infrastructure.
-                <br />
-                <span className="text-zinc-400">This app stores nothing — zero-retention by design.</span>
-              </p>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }

@@ -8,6 +8,7 @@ import Sidebar from '@/components/Sidebar';
 import ActivityLog from '@/components/ActivityLog';
 import ChatModal from '@/components/ChatModal';
 import type { ActivityEntry } from '@/lib/types';
+import AnimatedHeading from '@/components/AnimatedHeading';
 
 /* ─── Lazy-load Three.js (SSR-incompatible) ─── */
 const ThreeBackground = dynamic(() => import('@/components/ThreeBackground'), {
@@ -192,43 +193,52 @@ export default function Dashboard() {
     };
   }, []);
 
-  /* ─── Use Existing Account ─── */
+  /* ─── Use Extension Bridge (Replaces Unipile Auth) ─── */
   const handleUseExistingAccount = useCallback(async () => {
-    // Clear any pending auth polling
-    if (authPollRef.current) {
-      clearInterval(authPollRef.current);
-      authPollRef.current = null;
-    }
-
     setIsConnecting(true);
     setErrorMessage(null);
+    addTerminalLog('[Bridge] Connecting to Chrome Extension bridge...');
 
     try {
-      const response = await fetch('/api/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'list-accounts' }),
-      });
+      // Create a one-time listener for the extension's response
+      const handleScrapeResponse = (e: Event) => {
+        const customEvent = e as CustomEvent;
+        window.removeEventListener('SCRAPE_RESULTS', handleScrapeResponse);
+        
+        if (customEvent.detail?.success && customEvent.detail?.messages) {
+          addTerminalLog(`[Bridge] Extension successfully scraped ${customEvent.detail.messages.length} unread messages from LinkedIn.`);
+          // Save the raw messages in session storage so the process loop can use them
+          sessionStorage.setItem('scraped_messages', JSON.stringify(customEvent.detail.messages));
+          // Set account ID to bypass the Connect screen
+          setAccountId('extension-bridge-user');
+        } else {
+          setErrorMessage(customEvent.detail?.error || 'Failed to extract data from LinkedIn tab.');
+          addTerminalLog(`[Bridge Error] ${customEvent.detail?.error}`);
+          setIsConnecting(false);
+        }
+      };
 
-      const data = await response.json();
+      // Listen for the response from the injected bridge.ts
+      window.addEventListener('SCRAPE_RESULTS', handleScrapeResponse);
 
-      if (data.success && data.accounts?.length > 0) {
-        // Auto-connect to the first LinkedIn account found
-        const account = data.accounts[0];
-        setAccountId(account.id || account.account_id);
-        setShowConnectModal(false);
-        setErrorMessage(null);
-      } else if (data.success && data.accounts?.length === 0) {
-        setErrorMessage('No LinkedIn accounts found. Please connect one first.');
-      } else {
-        setErrorMessage(data.error || 'Failed to fetch accounts');
-      }
+      // Fire the command to wake up the extension
+      window.dispatchEvent(new CustomEvent('START_SCRAPE'));
+      addTerminalLog('[Bridge] Sent START_SCRAPE command. Waiting for LinkedIn tab...');
+      
+      // Fallback timeout in case extension is not installed
+      setTimeout(() => {
+        if (!sessionStorage.getItem('scraped_messages')) {
+          window.removeEventListener('SCRAPE_RESULTS', handleScrapeResponse);
+          setErrorMessage('Extension not responding. Please make sure the LinkedIn Triage extension is installed and active.');
+          setIsConnecting(false);
+        }
+      }, 10000);
+      
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Failed to fetch accounts');
-    } finally {
+      setErrorMessage(error instanceof Error ? error.message : 'Bridge failure');
       setIsConnecting(false);
     }
-  }, []);
+  }, [addTerminalLog]);
 
   /* ─── Listen for popup postMessage (backup mechanism) ─── */
   useEffect(() => {
@@ -252,13 +262,23 @@ export default function Dashboard() {
     isProcessingRef.current = true;
     setErrorMessage(null);
     addTerminalLog(safeMode ? '[System] Initiating process loop (SAFE MODE)...' : '[System] Initiating process loop (LIVE MODE)...');
-    addTerminalLog('[Network] Fetching unread messages from Unipile...');
+    
+    // Retrieve the raw messages scraped by the extension
+    const rawMessages = JSON.parse(sessionStorage.getItem('scraped_messages') || '[]');
+    
+    if (rawMessages.length === 0) {
+      addTerminalLog('[System] No unread messages found by the Extension.');
+      isProcessingRef.current = false;
+      return;
+    }
+
+    addTerminalLog(`[Network] Sending ${rawMessages.length} raw messages to LLM backend...`);
 
     try {
       const response = await fetch('/api/process-loop', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ account_id: accountId, safeMode }),
+        body: JSON.stringify({ account_id: accountId, safeMode, rawMessages }),
       });
 
       const data = await response.json();

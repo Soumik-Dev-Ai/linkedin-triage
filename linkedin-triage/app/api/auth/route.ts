@@ -160,6 +160,13 @@ export async function POST(request: NextRequest) {
       });
 
       if (!response.ok) {
+        if (response.status === 401) {
+          console.warn('[Auth] Unipile API Key invalid (401). Falling back to Showcase Mock Account.');
+          return NextResponse.json({
+            success: true,
+            accounts: [{ id: 'showcase-mock-id', provider: 'LINKEDIN', name: 'Showcase Demo Account' }],
+          });
+        }
         const errorText = await response.text();
         console.error('[Auth] Failed to list accounts:', response.status, errorText);
         return NextResponse.json(

@@ -185,6 +185,33 @@ export default function Sidebar({
           </motion.div>
         )}
 
+        {!accountId && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="mt-4 pt-4 border-t border-white/5"
+          >
+            <button
+              onClick={onConnect}
+              disabled={isConnecting}
+              className="w-full py-2.5 px-4 bg-zinc-800/80 hover:bg-zinc-700/80 border border-white/10 text-zinc-300 rounded-lg text-xs font-semibold tracking-wide transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isConnecting ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" />
+                  CONNECTING...
+                </>
+              ) : (
+                <>
+                  <Zap size={14} className="text-emerald-400" />
+                  CONNECT YOUR ACCOUNT
+                </>
+              )}
+            </button>
+          </motion.div>
+        )}
+
+
 
       </div>
 

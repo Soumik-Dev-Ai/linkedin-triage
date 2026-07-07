@@ -342,11 +342,23 @@ async function sendAutoReply(chatId: string, message: string): Promise<boolean> 
           'Accept': 'application/json',
           'Content-Type': 'application/json',
           'X-API-KEY': UNIPILE_API_KEY,
+          'Authorization': `Bearer ${UNIPILE_API_KEY}`,
         },
         body: JSON.stringify({ text: message }),
-  // Skip Unipile auto-reply since we are using the Extension bridge.
-  // The extension will handle manual sending via the UI instead.
-  return false;
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[ProcessLoop] Failed to send reply to chat ${chatId}:`, response.status, errorText);
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error(`[ProcessLoop] Error sending reply to chat ${chatId}:`, error);
+    return false;
+  }
 }
 
 /* ─── Helper: Fetch unread chats from Unipile ─── */
@@ -361,40 +373,17 @@ async function fetchUnreadChats(accountId: string): Promise<UnipileChat[]> {
     headers: {
       'Accept': 'application/json',
       'X-API-KEY': UNIPILE_API_KEY,
+      'Authorization': `Bearer ${UNIPILE_API_KEY}`,
     },
   });
 
   if (!response.ok) {
-    if (response.status === 401) {
-      console.warn('[ProcessLoop] Unipile API Key invalid (401). Falling back to Showcase Mock Data.');
-      // Return highly realistic mock chats for the showcase
-      return [
-        {
-          id: 'mock-chat-1',
-          account_id: accountId,
-          timestamp: new Date().toISOString(),
-          unread_count: 1,
-          last_message: {
-            id: 'mock-msg-1',
-            text: "Hi! I saw your profile and would love to connect. I run an offshore dev agency and we have great rates for React developers. Let's schedule a 15-min call next week.",
-            sender: { id: 'sender-1', name: 'Recruiter Ray', display_name: 'Recruiter Ray' }
-          }
-        },
-        {
-          id: 'mock-chat-2',
-          account_id: accountId,
-          timestamp: new Date(Date.now() - 1000 * 60).toISOString(),
-          unread_count: 1,
-          last_message: {
-            id: 'mock-msg-2',
-            text: "Hey, are you still looking for a Technical Co-founder? I have a great idea for an AI startup but I need someone to build the MVP.",
-            sender: { id: 'sender-2', name: 'Idea Guy Ian', display_name: 'Idea Guy Ian' }
-          }
-        }
-      ] as any;
-    }
-
     const errorText = await response.text();
+
+    if (response.status === 401) {
+      console.error('[ProcessLoop] Unipile API Key is invalid or expired.');
+      throw new Error('Unipile API Key invalid (401)');
+    }
 
     // Handle rate limiting
     if (response.status === 429) {
@@ -414,18 +403,24 @@ async function fetchUnreadChats(accountId: string): Promise<UnipileChat[]> {
 export async function POST(request: NextRequest): Promise<NextResponse<ProcessLoopResponse>> {
   try {
     const body = await request.json();
-    const { rawMessages } = body;
+    const { account_id, safeMode } = body;
 
-    if (!rawMessages || !Array.isArray(rawMessages) || rawMessages.length === 0) {
-      return NextResponse.json({
-        success: true,
-        entries: [],
-        processedCount: 0,
-      });
+    if (!account_id || typeof account_id !== 'string') {
+      return NextResponse.json(
+        { success: false, entries: [], processedCount: 0, error: 'Missing or invalid account_id' },
+        { status: 400 }
+      );
+    }
+
+    if (!UNIPILE_API_KEY) {
+      return NextResponse.json(
+        { success: false, entries: [], processedCount: 0, error: 'UNIPILE_API_KEY not configured' },
+        { status: 500 }
+      );
     }
 
     // -- Analytics Tracking (Zero-Retention) --
-    // We log the usage (how many messages processed) without storing the message content
+    // We log the usage without storing the message content
     try {
       const dataDir = path.join(process.cwd(), 'data');
       await fs.mkdir(dataDir, { recursive: true }).catch(() => {});
@@ -433,7 +428,6 @@ export async function POST(request: NextRequest): Promise<NextResponse<ProcessLo
       const logEntry = JSON.stringify({
         timestamp: new Date().toISOString(),
         action: 'CLASSIFICATION_RUN',
-        messagesProcessed: rawMessages.length,
         modelsUsed: getAvailableModels().length
       }) + '\n';
       await fs.appendFile(usagePath, logEntry);
@@ -442,14 +436,98 @@ export async function POST(request: NextRequest): Promise<NextResponse<ProcessLo
     }
     // -----------------------------------------
 
-    // 1. Ingest raw messages from Extension Bridge
-    const messagesToClassify = rawMessages.map((m: any, i: number) => ({
-      index: i,
-      senderName: m.senderName || 'Unknown Sender',
-      text: m.text || '[Attachment/No text content]',
-      chatId: m.chatId || `chat-${Date.now()}-${i}`,
-      rawHistory: [{ isMe: false, text: m.text }],
-    }));
+    // 1. Fetch unread chats
+    let chats: UnipileChat[];
+    try {
+      chats = await fetchUnreadChats(account_id);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'RATE_LIMITED') {
+        return NextResponse.json({
+          success: true,
+          entries: [],
+          processedCount: 0,
+          error: 'Rate limited — will retry on next cycle',
+        });
+      }
+      throw error;
+    }
+
+    if (chats.length === 0) {
+      return NextResponse.json({
+        success: true,
+        entries: [],
+        processedCount: 0,
+      });
+    }
+
+    // 2. Fetch context and extract message data
+    const messagesToClassify = [];
+    for (let i = 0; i < chats.length; i++) {
+      const chat = chats[i];
+      
+      // Determine the best sender name safely
+      const senderObj = chat.last_message?.sender;
+      let senderName = senderObj?.display_name || senderObj?.name;
+      if (!senderName && chat.attendees && chat.attendees.length > 0) {
+         // Try to find attendee who is not the account_id
+         const other = chat.attendees.find(a => a.id !== account_id);
+         if (other) {
+           senderName = other.display_name || other.name;
+         } else {
+           senderName = chat.attendees[0].display_name || chat.attendees[0].name;
+         }
+      }
+      senderName = senderName || 'Unknown Sender';
+
+      // Fetch last 3 messages for context to help the LLM
+      let chatHistoryText = '';
+      let rawHistory: { isMe: boolean; text: string }[] = [];
+      try {
+        const msgsRes = await fetch(`${UNIPILE_DSN}/api/v1/chats/${chat.id}/messages?limit=3`, {
+          headers: { 
+            'Accept': 'application/json', 
+            'X-API-KEY': UNIPILE_API_KEY,
+            'Authorization': `Bearer ${UNIPILE_API_KEY}`
+          },
+        });
+        if (msgsRes.ok) {
+           const msgsData = await msgsRes.json();
+           const msgItems = msgsData.items || [];
+           // Reverse to get chronological order
+           rawHistory = msgItems.reverse().map((m: any) => ({
+             isMe: m.is_sender === 1,
+             text: m.text || '[Attachment/No text]'
+           }));
+           chatHistoryText = rawHistory.map((m: any) => 
+             `${m.isMe ? 'Me' : senderName}: ${m.text}`
+           ).join('\n');
+        }
+      } catch (err) {
+        // Fallback to just the last message if fetch fails
+      }
+
+      const fallbackText = chat.last_message?.text || '[Attachment/No text content]';
+      const contextText = chatHistoryText ? chatHistoryText : `${senderName}: ${fallbackText}`;
+
+      // If fetch failed, manually add fallback to rawHistory
+      if (rawHistory.length === 0) {
+        rawHistory = [{ isMe: chat.last_message?.is_sender === 1, text: fallbackText }];
+      }
+
+      // If the last message was sent by the user ("Me"), skip processing because the user already replied
+      if (rawHistory[rawHistory.length - 1]?.isMe) {
+        console.log(`[ProcessLoop] Skipping chat ${chat.id} because the last message was sent by the user.`);
+        continue;
+      }
+
+      messagesToClassify.push({
+        index: i,
+        senderName,
+        text: contextText,
+        chatId: chat.id,
+        rawHistory,
+      });
+    }
 
     // 3. Classify via LLM (graceful — never crashes the loop)
     const classifications = await classifyMessages(messagesToClassify);

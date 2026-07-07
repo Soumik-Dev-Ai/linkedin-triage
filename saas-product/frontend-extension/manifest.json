@@ -13,6 +13,11 @@
       "matches": ["https://www.linkedin.com/*"],
       "js": ["src/content/index.ts"],
       "run_at": "document_end"
+    },
+    {
+      "matches": ["http://localhost/*", "https://*.vercel.app/*"],
+      "js": ["src/content/bridge.ts"],
+      "run_at": "document_end"
     }
   ],
   "permissions": [
@@ -28,6 +33,8 @@
     }
   ],
   "host_permissions": [
-    "https://www.linkedin.com/*"
+    "https://www.linkedin.com/*",
+    "http://localhost/*",
+    "https://*.vercel.app/*"
   ]
 }

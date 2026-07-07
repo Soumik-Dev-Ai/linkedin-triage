@@ -66,6 +66,7 @@ export async function POST(request: NextRequest) {
           'Accept': 'application/json',
           'Content-Type': 'application/json',
           'X-API-KEY': apiKey,
+          'Authorization': `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
           type: 'create',
@@ -156,6 +157,7 @@ export async function POST(request: NextRequest) {
         headers: {
           'Accept': 'application/json',
           'X-API-KEY': apiKey,
+          'Authorization': `Bearer ${apiKey}`,
         },
       });
 

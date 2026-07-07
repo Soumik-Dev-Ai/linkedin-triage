@@ -193,49 +193,87 @@ export default function Dashboard() {
     };
   }, []);
 
-  /* ─── Use Extension Bridge (Replaces Unipile Auth) ─── */
-  const handleUseExistingAccount = useCallback(async () => {
+  /* ─── Create New Unipile Auth Session ─── */
+  const handleCreateAuth = useCallback(async () => {
     setIsConnecting(true);
     setErrorMessage(null);
-    addTerminalLog('[Bridge] Connecting to Chrome Extension bridge...');
+    addTerminalLog('[Network] Requesting new secure auth session...');
 
     try {
-      // Create a one-time listener for the extension's response
-      const handleScrapeResponse = (e: Event) => {
-        const customEvent = e as CustomEvent;
-        window.removeEventListener('SCRAPE_RESULTS', handleScrapeResponse);
+      const response = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'create-auth' }),
+      });
+
+      const data = await response.json();
+
+      if (data.success && data.authUrl) {
+        addTerminalLog('[Network] Received auth URL, opening secure popup...');
         
-        if (customEvent.detail?.success && customEvent.detail?.messages) {
-          addTerminalLog(`[Bridge] Extension successfully scraped ${customEvent.detail.messages.length} unread messages from LinkedIn.`);
-          // Save the raw messages in session storage so the process loop can use them
-          sessionStorage.setItem('scraped_messages', JSON.stringify(customEvent.detail.messages));
-          // Set account ID to bypass the Connect screen
-          setAccountId('extension-bridge-user');
-        } else {
-          setErrorMessage(customEvent.detail?.error || 'Failed to extract data from LinkedIn tab.');
-          addTerminalLog(`[Bridge Error] ${customEvent.detail?.error}`);
-          setIsConnecting(false);
-        }
-      };
+        // Open the Hosted Auth link in a popup window
+        const width = 500;
+        const height = 700;
+        const left = window.screenX + (window.outerWidth - width) / 2;
+        const top = window.screenY + (window.outerHeight - height) / 2;
+        window.open(
+          data.authUrl,
+          'LinkedIn Triage Auth',
+          `width=${width},height=${height},left=${left},top=${top}`
+        );
 
-      // Listen for the response from the injected bridge.ts
-      window.addEventListener('SCRAPE_RESULTS', handleScrapeResponse);
-
-      // Fire the command to wake up the extension
-      window.dispatchEvent(new CustomEvent('START_SCRAPE'));
-      addTerminalLog('[Bridge] Sent START_SCRAPE command. Waiting for LinkedIn tab...');
-      
-      // Fallback timeout in case extension is not installed
-      setTimeout(() => {
-        if (!sessionStorage.getItem('scraped_messages')) {
-          window.removeEventListener('SCRAPE_RESULTS', handleScrapeResponse);
-          setErrorMessage('Extension not responding. Please make sure the LinkedIn Triage extension is installed and active.');
-          setIsConnecting(false);
-        }
-      }, 10000);
-      
+        // Start polling to check if an account was successfully connected
+        if (authPollRef.current) clearInterval(authPollRef.current);
+        authPollRef.current = setInterval(() => {
+          handleUseExistingAccount();
+        }, 3000);
+      } else {
+        setErrorMessage(data.error || 'Failed to create auth session');
+      }
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Bridge failure');
+      setErrorMessage(error instanceof Error ? error.message : 'Auth failure');
+    } finally {
+      setIsConnecting(false);
+    }
+  }, [addTerminalLog]);
+
+  /* ─── Showcase Mode Auth (Bypasses Extension) ─── */
+  const handleUseExistingAccount = useCallback(async () => {
+    // Clear any pending auth polling
+    if (authPollRef.current) {
+      clearInterval(authPollRef.current);
+      authPollRef.current = null;
+    }
+
+    setIsConnecting(true);
+    setErrorMessage(null);
+    addTerminalLog('[Network] Connecting to backend services...');
+
+    try {
+      const response = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'list-accounts' }),
+      });
+
+      const data = await response.json();
+
+      if (data.success && data.accounts?.length > 0) {
+        // Auto-connect to the first LinkedIn account found (or the mock account)
+        const account = data.accounts[0];
+        setAccountId(account.id || account.account_id);
+        setShowConnectModal(false);
+        setErrorMessage(null);
+        addTerminalLog(`[System] Successfully authenticated as: ${account.name || 'User'}`);
+      } else if (data.success && data.accounts?.length === 0) {
+        // We only show error if they try to use an existing account and it fails
+        // setErrorMessage('No LinkedIn accounts found. Please connect one first.');
+      } else {
+        setErrorMessage(data.error || 'Failed to fetch accounts');
+      }
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to fetch accounts');
+    } finally {
       setIsConnecting(false);
     }
   }, [addTerminalLog]);
@@ -262,23 +300,13 @@ export default function Dashboard() {
     isProcessingRef.current = true;
     setErrorMessage(null);
     addTerminalLog(safeMode ? '[System] Initiating process loop (SAFE MODE)...' : '[System] Initiating process loop (LIVE MODE)...');
-    
-    // Retrieve the raw messages scraped by the extension
-    const rawMessages = JSON.parse(sessionStorage.getItem('scraped_messages') || '[]');
-    
-    if (rawMessages.length === 0) {
-      addTerminalLog('[System] No unread messages found by the Extension.');
-      isProcessingRef.current = false;
-      return;
-    }
-
-    addTerminalLog(`[Network] Sending ${rawMessages.length} raw messages to LLM backend...`);
+    addTerminalLog('[Network] Fetching unread messages from secure pipeline...');
 
     try {
       const response = await fetch('/api/process-loop', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ account_id: accountId, safeMode, rawMessages }),
+        body: JSON.stringify({ account_id: accountId, safeMode }),
       });
 
       const data = await response.json();
@@ -533,7 +561,7 @@ export default function Dashboard() {
           accountId={accountId}
           isPolling={isPolling}
           activityLog={activityLog}
-          onConnect={() => setShowConnectModal(true)}
+          onConnect={handleCreateAuth}
           onKillSession={handleKillSession}
           isConnecting={isConnecting}
           isKilling={isKilling}

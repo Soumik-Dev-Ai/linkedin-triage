@@ -36,32 +36,18 @@ function scanForNewMessages() {
 
   if (newMessages.length > 0) {
     console.log('Found new messages:', newMessages);
-    // Send to background for processing
-    chrome.runtime.sendMessage({ type: 'PROCESS_MESSAGE', data: newMessages }, (response) => {
-      if (response && response.success) {
-        console.log('Classified by background:', response.classifications);
-        // Send to popup UI
-        chrome.runtime.sendMessage({ 
-          type: 'NEW_ACTIVITY', 
-          data: {
-            id: Date.now().toString(),
-            chatId: 'linkedin-chat-1',
-            senderName: newMessages[0].senderName,
-            messagePreview: newMessages[0].text,
-            category: response.classifications[0].category,
-            action: 'DRAFTED: ' + response.classifications[0].draftReply,
-            timestamp: new Date().toISOString(),
-            draftReply: response.classifications[0].draftReply,
-            sent: false
-          }
-        });
-      }
-    });
+    return { success: true, messages: newMessages };
   }
+  return { success: true, messages: [] };
 }
 
-// Poll every 5 seconds
-setInterval(scanForNewMessages, 5000);
+// Listen for commands from the extension background script
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.type === 'EXECUTE_SCRAPE') {
+    const result = scanForNewMessages();
+    sendResponse(result);
+    return true;
+  }
 
 // Listen for commands from the popup to inject text
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {

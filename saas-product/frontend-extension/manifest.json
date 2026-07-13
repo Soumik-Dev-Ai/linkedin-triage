@@ -3,28 +3,31 @@
   "name": "AI Triage Bridge",
   "version": "1.0.0",
   "description": "Secure data bridge between LinkedIn and the AI Triage Dashboard.",
-  "action": {},
+  "action": {
+    "default_title": "Open AI Triage Dashboard"
+  },
   "background": {
-    "service_worker": "src/background/index.ts",
-    "type": "module"
+    "service_worker": "scripts/background.js"
   },
   "content_scripts": [
     {
-      "matches": ["https://www.linkedin.com/*"],
-      "js": ["src/content/index.ts"],
+      "matches": ["*://*.linkedin.com/*"],
+      "js": ["scripts/content-linkedin.js"],
       "run_at": "document_end"
     },
     {
-      "matches": ["http://localhost/*", "https://*.vercel.app/*"],
-      "js": ["src/content/bridge.ts"],
+      "matches": ["http://localhost/*", "https://linkedin-triage.vercel.app/*", "https://aitriage.vercel.app/*", "https://*.vercel.app/*"],
+      "js": ["scripts/content-dashboard.js"],
       "run_at": "document_end"
     }
   ],
-  "permissions": ["storage", "activeTab", "scripting", "tabs"],
+  "permissions": ["activeTab", "scripting", "tabs"],
   "host_permissions": [
-    "https://www.linkedin.com/*",
+    "*://*.linkedin.com/*",
     "http://localhost/*",
-    "https://*.vercel.app/*"
+    "https://*.vercel.app/*",
+    "https://linkedin-triage.vercel.app/*",
+    "https://aitriage.vercel.app/*"
   ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"

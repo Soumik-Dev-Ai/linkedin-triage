@@ -277,7 +277,7 @@ export default function App() {
           </motion.div>
 
           <motion.a
-            href="https://chromewebstore.google.com/detail/placeholder-id"
+            href="https://chromewebstore.google.com/detail/YOUR_EXTENSION_ID"
             target="_blank"
             rel="noopener noreferrer"
             variants={itemVariants}
@@ -347,7 +347,7 @@ export default function App() {
             {/* CTA */}
             <motion.div variants={itemVariants} className="pt-4">
               <a
-                href="https://chromewebstore.google.com/detail/placeholder-id"
+                href="https://chromewebstore.google.com/detail/YOUR_EXTENSION_ID"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 bg-[#a78bfa] hover:bg-[#c4b5fd] text-[#0C0C0C] px-8 py-4 rounded-full font-bold text-base transition-all shadow-xl shadow-[#a78bfa]/20"

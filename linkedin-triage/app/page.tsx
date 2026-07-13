@@ -20,8 +20,9 @@ const ThreeBackground = dynamic(() => import('@/components/ThreeBackground'), {
 const POLL_INTERVAL = 30_000;
 
 type ScrapeMessage = Record<string, unknown>;
+type SendReplyResult = { success: boolean; error?: string };
 
-/* ─── Extension Bridge Helper ─── */
+/* ─── Extension Bridge Helpers ─── */
 async function requestExtensionScrape(): Promise<{ success: boolean; messages: ScrapeMessage[]; error?: string }> {
   return new Promise((resolve, reject) => {
     const handler = (event: Event) => {
@@ -41,6 +42,23 @@ async function requestExtensionScrape(): Promise<{ success: boolean; messages: S
       window.removeEventListener('EXTENSION_SCRAPE_RESULT', handler);
       reject(new Error('Extension scrape timed out'));
     }, 30000);
+  });
+}
+
+async function requestSendReply(chatId: string, draftReply: string): Promise<SendReplyResult> {
+  return new Promise((resolve, reject) => {
+    const handler = (event: Event) => {
+      window.removeEventListener('SEND_REPLY_RESULT', handler);
+      resolve((event as CustomEvent).detail);
+    };
+    window.addEventListener('SEND_REPLY_RESULT', handler);
+    window.dispatchEvent(new CustomEvent('SEND_REPLY', {
+      detail: { chatId, draftReply, origin: window.location.origin }
+    }));
+    setTimeout(() => {
+      window.removeEventListener('SEND_REPLY_RESULT', handler);
+      reject(new Error('Send reply timed out'));
+    }, 15000);
   });
 }
 
@@ -77,16 +95,28 @@ export default function Dashboard() {
 
   // Handler to send a draft reply
   const handleSendDraft = useCallback(async (id: string, chatId: string, draftReply: string) => {
-    if (!safeMode) {
-      window.dispatchEvent(new CustomEvent('SEND_REPLY', {
-        detail: { chatId, draftReply, origin: window.location.origin }
-      }));
+    if (safeMode) {
+      setToast('Safe mode — draft not sent');
+      addTerminalLog('[System] Safe mode active — skipped sending draft.');
+      setTimeout(() => setToast(null), 3000);
+      return;
     }
-    setActivityLog((prev) =>
-      prev.map((e) => (e.id === id ? { ...e, sent: true, action: `SENT: ${draftReply}` } : e))
-    );
-    setToast('Message sent successfully!');
-    addTerminalLog('[System] Draft sent and recorded.');
+    try {
+      const result = await requestSendReply(chatId, draftReply);
+      if (result.success) {
+        setActivityLog((prev) =>
+          prev.map((e) => (e.id === id ? { ...e, sent: true, action: `SENT: ${draftReply}` } : e))
+        );
+        setToast('Message sent successfully!');
+        addTerminalLog('[System] Draft sent and recorded.');
+      } else {
+        setToast(`Send failed: ${result.error || 'Unknown error'}`);
+        addTerminalLog(`[Error] Send failed: ${result.error || 'Unknown error'}`);
+      }
+    } catch {
+      setToast('Send timed out or failed');
+      addTerminalLog('[Error] Send timed out.');
+    }
     setTimeout(() => setToast(null), 3000);
   }, [safeMode, addTerminalLog]);
 

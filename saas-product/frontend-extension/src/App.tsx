@@ -1,3 +1,5 @@
+/// <reference types="chrome"/>
+
 import { useState, useEffect, useCallback } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { Shield } from 'lucide-react';
@@ -45,9 +47,9 @@ export default function App() {
     setToast('Sending draft via Content Script...');
     if (typeof chrome !== 'undefined' && chrome.tabs) {
       // Send message to active tab content script to inject the reply
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs: chrome.tabs.Tab[]) => {
         if (tabs[0].id) {
-          chrome.tabs.sendMessage(tabs[0].id, { type: 'SEND_REPLY', chatId, draftReply }, (response) => {
+          chrome.tabs.sendMessage(tabs[0].id, { type: 'SEND_REPLY', chatId, draftReply }, (response: any) => {
             if (response && response.success) {
               setActivityLog(prev => prev.map(e => e.id === id ? { ...e, sent: true, action: `SENT: ${draftReply}` } : e));
               setToast('Sent!');

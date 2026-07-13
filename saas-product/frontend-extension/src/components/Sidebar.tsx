@@ -19,9 +19,7 @@ interface SidebarProps {
   accountId: string | null;
   isPolling: boolean;
   activityLog: ActivityEntry[];
-  onConnect: () => void;
   onKillSession: () => void;
-  isConnecting: boolean;
   isKilling: boolean;
   lastPollTime: string | null;
   errorMessage: string | null;
@@ -37,9 +35,7 @@ export default function Sidebar({
   accountId,
   isPolling,
   activityLog,
-  onConnect,
   onKillSession,
-  isConnecting,
   isKilling,
   lastPollTime,
   errorMessage,
@@ -452,8 +448,7 @@ export default function Sidebar({
                 exit={{ opacity: 0, height: 0 }}
                 className="text-[10px] text-zinc-500 text-center leading-relaxed px-2"
               >
-                This will permanently delete the connected account from Unipile
-                and flush all session data.
+                This will stop the triage loop and clear all session data.
               </motion.p>
             )}
           </AnimatePresence>

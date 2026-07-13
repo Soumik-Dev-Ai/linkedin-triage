@@ -13,11 +13,15 @@ const app = express();
 // 1. HTTP Security Headers
 app.use(helmet());
 
-// 2. Strict CORS Lockdown
-// In production, this should ideally be the exact chrome-extension://[your-extension-id]
+// 2. Strict CORS Lockdown — only known origins
+const ALLOWED_ORIGINS = [
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'https://linkedin-spam-analyser.vercel.app',
+];
 app.use(cors({
   origin: function (origin, callback) {
-    if (!origin || origin.startsWith('chrome-extension://') || origin.startsWith('http://localhost')) {
+    if (!origin || ALLOWED_ORIGINS.includes(origin) || origin.startsWith('chrome-extension://')) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
@@ -119,7 +123,16 @@ RESPONSE FORMAT (strict JSON):
 app.post('/api/classify', async (req, res) => {
   try {
     const { messages } = req.body;
-    if (!messages || messages.length === 0) return res.json({ success: true, classifications: [] });
+    if (!Array.isArray(messages) || messages.length === 0) return res.json({ success: true, classifications: [] });
+    if (messages.length > 50) return res.status(400).json({ error: 'Too many messages (max 50)' });
+    for (const m of messages) {
+      if (typeof m.senderName !== 'string' || typeof m.text !== 'string') {
+        return res.status(400).json({ error: 'Each message must have string senderName and text' });
+      }
+      if (m.senderName.length > 200 || m.text.length > 5000) {
+        return res.status(400).json({ error: 'Message fields too large' });
+      }
+    }
     
     // Read the In-Context Learning File
     let fewShotExamples = '';
@@ -173,9 +186,16 @@ app.post('/api/classify', async (req, res) => {
 
 app.post('/api/dev-login', (req, res) => {
   const { email, password } = req.body;
-  const adminEmail = process.env.ADMIN_EMAIL || 'soumikdey666@gmail.com';
+  if (typeof email !== 'string' || typeof password !== 'string') {
+    return res.status(400).json({ error: 'Email and password must be strings' });
+  }
+  if (email.length > 320 || password.length > 256) {
+    return res.status(400).json({ error: 'Fields too large' });
+  }
+  const adminEmail = process.env.DEVELOPER_EMAIL || 'soumikdey666@gmail.com';
+  const adminPassword = process.env.DEVELOPER_PASSWORD || '';
   
-  if (email === adminEmail) { // Simple auth for prototype
+  if (email === adminEmail && password === adminPassword) {
     res.json({ success: true });
   } else {
     res.status(401).json({ error: 'Invalid credentials' });
@@ -185,7 +205,12 @@ app.post('/api/dev-login', (req, res) => {
 app.post('/api/save-training', (req, res) => {
   try {
     const { jsonlContent } = req.body;
-    if (!jsonlContent) return res.status(400).json({ error: 'Invalid content' });
+    if (typeof jsonlContent !== 'string' || jsonlContent.length === 0) {
+      return res.status(400).json({ error: 'Invalid content' });
+    }
+    if (jsonlContent.length > 100000) {
+      return res.status(400).json({ error: 'Content too large (max 100KB)' });
+    }
     
     const dataDir = path.join(process.cwd(), 'data');
     if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
@@ -201,39 +226,57 @@ app.post('/api/save-training', (req, res) => {
 });
 
 async function callModel(config: ModelConfig, basePrompt: string, userPrompt: string, expectedCount: number): Promise<any[]> {
-  if (config.provider === 'gemini') {
-    const response = await fetch(`${config.endpoint}/models/${config.model}:generateContent?key=${LLM_KEYS.gemini}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: basePrompt + '\\n\\n' + userPrompt }] }],
-        generationConfig: { temperature: 0.1, responseMimeType: 'application/json' },
-      }),
-    });
-    if (!response.ok) throw new Error(await response.text());
-    const data = await response.json();
-    const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    const parsed = JSON.parse(content);
-    return parsed.classifications;
-  } else {
-    const response = await fetch(config.endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${LLM_KEYS[config.provider]}` },
-      body: JSON.stringify({
-        model: config.model,
-        messages: [
-          { role: 'system', content: basePrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        temperature: 0.1,
-        response_format: { type: 'json_object' },
-      }),
-    });
-    if (!response.ok) throw new Error(await response.text());
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content;
-    const parsed = JSON.parse(content);
-    return parsed.classifications;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    if (config.provider === 'gemini') {
+      const response = await fetch(`${config.endpoint}/models/${config.model}:generateContent`, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': LLM_KEYS.gemini },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: basePrompt + '\\n\\n' + userPrompt }] }],
+          generationConfig: { temperature: 0.1, responseMimeType: 'application/json' },
+        }),
+      });
+      if (!response.ok) throw new Error(await response.text());
+      const data = await response.json();
+      const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      const parsed = safeJsonParse(content);
+      if (!parsed || !Array.isArray(parsed.classifications)) throw new Error('Invalid Gemini response format');
+      return parsed.classifications;
+    } else {
+      const response = await fetch(config.endpoint, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${LLM_KEYS[config.provider]}` },
+        body: JSON.stringify({
+          model: config.model,
+          messages: [
+            { role: 'system', content: basePrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          temperature: 0.1,
+          response_format: { type: 'json_object' },
+        }),
+      });
+      if (!response.ok) throw new Error(await response.text());
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content;
+      const parsed = safeJsonParse(content);
+      if (!parsed || !Array.isArray(parsed.classifications)) throw new Error('Invalid LLM response format');
+      return parsed.classifications;
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function safeJsonParse(text: string): any {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
   }
 }
 

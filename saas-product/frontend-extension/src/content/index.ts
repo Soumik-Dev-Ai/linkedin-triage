@@ -1,68 +1,96 @@
-console.log('LinkedIn Triage Content Script injected.');
+console.log('[AI Triage LinkedIn] Injected into LinkedIn.');
 
-let processedMessageIds = new Set<string>();
+function scanConversations(): { success: boolean; messages: any[]; error?: string } {
+  const messages: any[] = [];
 
-// Basic DOM scraper to find unread messages on LinkedIn
-function scanForNewMessages() {
-  // This is a simplified selector for demonstration purposes.
-  // Real LinkedIn DOM is highly obfuscated and changes frequently.
-  const messageNodes = document.querySelectorAll('.msg-s-message-list__event');
+  const selectors = [
+    '.msg-s-message-list__event',
+    '.msg-conversation-card__message--text',
+    '[data-test-message-list-event]',
+    '.message-list-item'
+  ];
+
+  let nodes: NodeListOf<Element> | null = null;
+  for (const sel of selectors) {
+    const found = document.querySelectorAll(sel);
+    if (found.length > 0) { nodes = found; break; }
+  }
+
+  if (!nodes || nodes.length === 0) {
+    return { success: true, messages: [] };
+  }
+
+  const conversationNodes = document.querySelectorAll('.msg-conversation-listitem, [data-test-conversation-list-item]');
   
-  if (messageNodes.length === 0) return;
+  conversationNodes.forEach((convNode, convIndex) => {
+    try {
+      const nameEl = convNode.querySelector('.msg-conversation-listitem__participant-names, [data-test-conversation-name]');
+      const snippetEl = convNode.querySelector('.msg-conversation-card__message--text, .msg-conversation-listitem__message-snippet');
+      
+      const senderName = nameEl?.textContent?.trim() || 'Unknown';
+      const snippet = snippetEl?.textContent?.trim() || '';
 
-  const newMessages: any[] = [];
-  
-  messageNodes.forEach((node, index) => {
-    const textNode = node.querySelector('.msg-s-event-listitem__body');
-    const senderNode = node.querySelector('.msg-s-message-group__name');
-    
-    if (textNode && senderNode) {
-      const text = textNode.textContent?.trim();
-      const sender = senderNode.textContent?.trim();
-      
-      // Use a simple hash of text+sender as an ID since DOM nodes don't always have stable IDs
-      const msgId = sender + '-' + (text ? text.substring(0, 20) : '');
-      
-      if (!processedMessageIds.has(msgId) && text && sender) {
-        processedMessageIds.add(msgId);
-        newMessages.push({
-          index,
-          senderName: sender,
-          text
-        });
-      }
-    }
+      if (!snippet) return;
+
+      const convLink = convNode.querySelector('a[href*="/messaging/thread/"]');
+      const hrefMatch = convLink?.getAttribute('href')?.match(/thread\/([^/?]+)/);
+      const chatId = hrefMatch ? hrefMatch[1] : `conv-${convIndex}`;
+
+      const msgText = `${senderName}: ${snippet}`;
+      messages.push({
+        chatId,
+        senderName,
+        text: msgText,
+        messages: [
+          { isMe: false, text: snippet }
+        ]
+      });
+    } catch { }
   });
 
-  if (newMessages.length > 0) {
-    console.log('Found new messages:', newMessages);
-    return { success: true, messages: newMessages };
-  }
-  return { success: true, messages: [] };
+  return { success: true, messages };
 }
 
-// Listen for commands from the extension background script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === 'EXECUTE_SCRAPE') {
-    const result = scanForNewMessages();
+    const result = scanConversations();
     sendResponse(result);
     return true;
   }
 
-// Listen for commands from the popup to inject text
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === 'SEND_REPLY') {
-    const inputField = document.querySelector('.msg-form__contenteditable') as HTMLElement;
-    const sendBtn = document.querySelector('.msg-form__send-button') as HTMLButtonElement;
+    const inputSelectors = [
+      '.msg-form__contenteditable',
+      '[data-test-message-composer] [contenteditable]',
+      '.msg-form__textarea',
+      'div[role="textbox"][aria-label*="message"]'
+    ];
     
+    let inputField: HTMLElement | null = null;
+    for (const sel of inputSelectors) {
+      inputField = document.querySelector(sel);
+      if (inputField) break;
+    }
+
+    const sendBtnSelectors = [
+      '.msg-form__send-button',
+      '[data-test-message-composer-send-button]',
+      'button[aria-label*="Send"]'
+    ];
+    
+    let sendBtn: HTMLElement | null = null;
+    for (const sel of sendBtnSelectors) {
+      sendBtn = document.querySelector(sel);
+      if (sendBtn) break;
+    }
+
     if (inputField && sendBtn) {
       inputField.textContent = request.draftReply;
       inputField.dispatchEvent(new Event('input', { bubbles: true }));
-      // Optional: actually click send
-      // sendBtn.click();
+      setTimeout(() => { (sendBtn as HTMLButtonElement).click(); }, 500);
       sendResponse({ success: true });
     } else {
-      sendResponse({ success: false, error: 'Could not find chat box' });
+      sendResponse({ success: false, error: 'Could not find reply form elements' });
     }
   }
 });

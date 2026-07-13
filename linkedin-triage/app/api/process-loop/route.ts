@@ -4,15 +4,20 @@ import path from 'path';
 import type {
   ActivityEntry,
   ProcessLoopResponse,
-  UnipileChat,
-  UnipileChatsResponse,
+  ScrapedChat,
   LLMClassification,
 } from '@/lib/types';
-import { CATEGORY_REPLIES } from '@/lib/types';
 
-/* ─── Configuration ─── */
-const UNIPILE_DSN = process.env.UNIPILE_DSN || 'https://api1.unipile.com:13111';
-const UNIPILE_API_KEY = process.env.UNIPILE_API_KEY || '';
+
+function checkApiKey(request: NextRequest): NextResponse | null {
+  const apiKey = request.headers.get('x-api-key');
+  const expected = process.env.API_SECRET;
+  if (!expected) return null;
+  if (apiKey !== expected) {
+    return NextResponse.json({ success: false, entries: [], processedCount: 0, error: 'Unauthorized' }, { status: 401 });
+  }
+  return null;
+}
 
 /* ─── LLM API Keys ─── */
 const LLM_KEYS = {
@@ -158,18 +163,18 @@ async function classifyMessages(
       lines.forEach((line, idx) => {
         try {
           const parsed = JSON.parse(line);
-          const userMsg = parsed.messages.find((m: any) => m.role === 'user')?.content;
-          const assistantMsg = parsed.messages.find((m: any) => m.role === 'assistant')?.content;
+          const userMsg = parsed.messages.find((m: { role: string }) => m.role === 'user')?.content;
+          const assistantMsg = parsed.messages.find((m: { role: string }) => m.role === 'assistant')?.content;
           if (userMsg && assistantMsg) {
             fewShotExamples += `\nExample ${idx + 1}:\n${userMsg}\nCategory: ${assistantMsg}\n`;
           }
-        } catch (e) {
+        } catch {
           // ignore bad JSONL line
         }
       });
       console.log(`[LLM] Injected ${lines.length} few-shot examples for auto-training.`);
     }
-  } catch (error) {
+  } catch {
     // No training data exists yet, ignore
   }
 
@@ -254,6 +259,7 @@ async function callGeminiAPI(
         contents: [{ parts: [{ text: `${basePrompt}\n\n${userPrompt}` }] }],
         generationConfig: { temperature: 0.1, responseMimeType: 'application/json' },
       }),
+      signal: AbortSignal.timeout(10000),
     }
   );
 
@@ -294,6 +300,7 @@ async function callOpenAICompatibleAPI(
       temperature: 0.1,
       response_format: { type: 'json_object' },
     }),
+    signal: AbortSignal.timeout(15000),
   });
 
   if (!response.ok) {
@@ -331,96 +338,24 @@ function normalizeClassifications(
   return result;
 }
 
-/* ─── Helper: Send auto-reply via Unipile ─── */
-async function sendAutoReply(chatId: string, message: string): Promise<boolean> {
-  try {
-    const response = await fetch(
-      `${UNIPILE_DSN}/api/v1/chats/${chatId}/messages`,
-      {
-        method: 'POST',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          'X-API-KEY': UNIPILE_API_KEY,
-          'Authorization': `Bearer ${UNIPILE_API_KEY}`,
-        },
-        body: JSON.stringify({ text: message }),
-      }
-    );
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`[ProcessLoop] Failed to send reply to chat ${chatId}:`, response.status, errorText);
-      return false;
-    }
-
-    return true;
-  } catch (error) {
-    console.error(`[ProcessLoop] Error sending reply to chat ${chatId}:`, error);
-    return false;
-  }
-}
-
-/* ─── Helper: Fetch unread chats from Unipile ─── */
-async function fetchUnreadChats(accountId: string): Promise<UnipileChat[]> {
-  const url = new URL(`${UNIPILE_DSN}/api/v1/chats`);
-  url.searchParams.set('account_id', accountId);
-  url.searchParams.set('unread', 'true');
-  url.searchParams.set('limit', '20');
-
-  const response = await fetch(url.toString(), {
-    method: 'GET',
-    headers: {
-      'Accept': 'application/json',
-      'X-API-KEY': UNIPILE_API_KEY,
-      'Authorization': `Bearer ${UNIPILE_API_KEY}`,
-    },
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-
-    if (response.status === 401) {
-      console.error('[ProcessLoop] Unipile API Key is invalid or expired.');
-      throw new Error('Unipile API Key invalid (401)');
-    }
-
-    // Handle rate limiting
-    if (response.status === 429) {
-      console.warn('[ProcessLoop] Rate limited by Unipile API');
-      throw new Error('RATE_LIMITED');
-    }
-
-    console.error('[ProcessLoop] Failed to fetch unread chats:', response.status, errorText);
-    throw new Error(`Unipile API error (${response.status}): ${errorText}`);
-  }
-
-  const data: UnipileChatsResponse = await response.json();
-  return data.items || [];
-}
-
 /* ─── Main POST Handler ─── */
 export async function POST(request: NextRequest): Promise<NextResponse<ProcessLoopResponse>> {
+  const authCheck = checkApiKey(request);
+  if (authCheck) return authCheck as NextResponse<ProcessLoopResponse>;
+
   try {
     const body = await request.json();
-    const { account_id, safeMode } = body;
+    const { messages } = body as { messages: ScrapedChat[]; safeMode?: boolean };
 
-    if (!account_id || typeof account_id !== 'string') {
-      return NextResponse.json(
-        { success: false, entries: [], processedCount: 0, error: 'Missing or invalid account_id' },
-        { status: 400 }
-      );
-    }
-
-    if (!UNIPILE_API_KEY) {
-      return NextResponse.json(
-        { success: false, entries: [], processedCount: 0, error: 'UNIPILE_API_KEY not configured' },
-        { status: 500 }
-      );
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return NextResponse.json({
+        success: true,
+        entries: [],
+        processedCount: 0,
+      });
     }
 
     // -- Analytics Tracking (Zero-Retention) --
-    // We log the usage without storing the message content
     try {
       const dataDir = path.join(process.cwd(), 'data');
       await fs.mkdir(dataDir, { recursive: true }).catch(() => {});
@@ -436,130 +371,58 @@ export async function POST(request: NextRequest): Promise<NextResponse<ProcessLo
     }
     // -----------------------------------------
 
-    // 1. Fetch unread chats
-    let chats: UnipileChat[];
-    try {
-      chats = await fetchUnreadChats(account_id);
-    } catch (error) {
-      if (error instanceof Error && error.message === 'RATE_LIMITED') {
-        return NextResponse.json({
-          success: true,
-          entries: [],
-          processedCount: 0,
-          error: 'Rate limited — will retry on next cycle',
-        });
-      }
-      throw error;
-    }
+    // Build messages to classify from scraped chats
+    const messagesToClassify = messages.map((chat, i) => {
+      // Build context text from chat messages
+      const chatHistoryText = chat.messages.map(m =>
+        `${m.isMe ? 'Me' : chat.senderName}: ${m.text}`
+      ).join('\n');
 
-    if (chats.length === 0) {
-      return NextResponse.json({
-        success: true,
-        entries: [],
-        processedCount: 0,
-      });
-    }
-
-    // 2. Fetch context and extract message data
-    const messagesToClassify = [];
-    for (let i = 0; i < chats.length; i++) {
-      const chat = chats[i];
-      
-      // Determine the best sender name safely
-      const senderObj = chat.last_message?.sender;
-      let senderName = senderObj?.display_name || senderObj?.name;
-      if (!senderName && chat.attendees && chat.attendees.length > 0) {
-         // Try to find attendee who is not the account_id
-         const other = chat.attendees.find(a => a.id !== account_id);
-         if (other) {
-           senderName = other.display_name || other.name;
-         } else {
-           senderName = chat.attendees[0].display_name || chat.attendees[0].name;
-         }
-      }
-      senderName = senderName || 'Unknown Sender';
-
-      // Fetch last 3 messages for context to help the LLM
-      let chatHistoryText = '';
-      let rawHistory: { isMe: boolean; text: string }[] = [];
-      try {
-        const msgsRes = await fetch(`${UNIPILE_DSN}/api/v1/chats/${chat.id}/messages?limit=3`, {
-          headers: { 
-            'Accept': 'application/json', 
-            'X-API-KEY': UNIPILE_API_KEY,
-            'Authorization': `Bearer ${UNIPILE_API_KEY}`
-          },
-        });
-        if (msgsRes.ok) {
-           const msgsData = await msgsRes.json();
-           const msgItems = msgsData.items || [];
-           // Reverse to get chronological order
-           rawHistory = msgItems.reverse().map((m: any) => ({
-             isMe: m.is_sender === 1,
-             text: m.text || '[Attachment/No text]'
-           }));
-           chatHistoryText = rawHistory.map((m: any) => 
-             `${m.isMe ? 'Me' : senderName}: ${m.text}`
-           ).join('\n');
-        }
-      } catch (err) {
-        // Fallback to just the last message if fetch fails
-      }
-
-      const fallbackText = chat.last_message?.text || '[Attachment/No text content]';
-      const contextText = chatHistoryText ? chatHistoryText : `${senderName}: ${fallbackText}`;
-
-      // If fetch failed, manually add fallback to rawHistory
-      if (rawHistory.length === 0) {
-        rawHistory = [{ isMe: chat.last_message?.is_sender === 1, text: fallbackText }];
-      }
-
-      // If the last message was sent by the user ("Me"), skip processing because the user already replied
-      if (rawHistory[rawHistory.length - 1]?.isMe) {
-        console.log(`[ProcessLoop] Skipping chat ${chat.id} because the last message was sent by the user.`);
-        continue;
-      }
-
-      messagesToClassify.push({
+      return {
         index: i,
-        senderName,
-        text: contextText,
-        chatId: chat.id,
-        rawHistory,
-      });
-    }
+        senderName: chat.senderName,
+        text: chatHistoryText || chat.text,
+        chatId: chat.chatId,
+        rawHistory: chat.messages,
+      };
+    });
+
+    // Filter out chats where the last message is from "Me"
+    const filteredMessages = messagesToClassify.filter(msg => {
+      const lastMsg = msg.rawHistory[msg.rawHistory.length - 1];
+      if (lastMsg?.isMe) {
+        console.log(`[ProcessLoop] Skipping chat ${msg.chatId} because the last message was sent by the user.`);
+        return false;
+      }
+      return true;
+    });
 
     // 3. Classify via LLM (graceful — never crashes the loop)
-    const classifications = await classifyMessages(messagesToClassify);
+    const classifications = await classifyMessages(filteredMessages);
 
-    // 4. Send auto-replies and build activity log
-    const entries: ActivityEntry[] = [];
-
-    for (let i = 0; i < messagesToClassify.length; i++) {
-      const msg = messagesToClassify[i];
-      const classification = classifications[i];
+    // 4. Build activity log with draft replies (no auto-send)
+    const entries: ActivityEntry[] = filteredMessages.map((msg, i) => {
+      const classification = classifications[i] || {
+        category: 'IRRELEVANT',
+        confidence: 0,
+        reasoning: 'No classification returned',
+        draftReply: 'Thanks for your message. We\'ll be in touch.',
+      };
       const replyText = classification.draftReply;
 
-      // Send auto-reply or simulate if safeMode
-      const replySent = safeMode ? true : await sendAutoReply(msg.chatId, replyText);
-
-      entries.push({
+      return {
         id: `${msg.chatId}-${Date.now()}-${i}`,
         senderName: msg.senderName,
         category: classification.category,
-        action: safeMode
-          ? `DRAFT: ${replyText}`
-          : replySent
-            ? `Auto-replied: "${replyText.substring(0, 50)}…"`
-            : `Reply failed — classified as ${classification.category}`,
+        action: `DRAFT: ${replyText}`,
         messagePreview: msg.text.substring(0, 100).replace(/\n/g, ' '),
         timestamp: new Date().toISOString(),
         chatId: msg.chatId,
         chatHistory: msg.rawHistory,
         draftReply: replyText,
-        sent: !safeMode,
-      });
-    }
+        sent: false,
+      };
+    });
 
     return NextResponse.json({
       success: true,

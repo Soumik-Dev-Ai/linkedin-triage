@@ -1,61 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-/* ─── Configuration ─── */
-const UNIPILE_DSN = process.env.UNIPILE_DSN || 'https://api1.unipile.com:13111';
-const UNIPILE_API_KEY = process.env.UNIPILE_API_KEY || '';
+function checkApiKey(request: NextRequest): NextResponse | null {
+  const apiKey = request.headers.get('x-api-key');
+  const expected = process.env.API_SECRET;
+  if (!expected) return null;
+  if (apiKey !== expected) {
+    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+  }
+  return null;
+}
 
-/**
- * POST /api/send-draft
- * Sends a previously-drafted reply through Unipile.
- * Body: { chatId: string, replyText: string }
- */
 export async function POST(request: NextRequest) {
+  const authCheck = checkApiKey(request);
+  if (authCheck) return authCheck;
+
   try {
     const body = await request.json();
     const { chatId, replyText } = body;
 
     if (!chatId || !replyText) {
-      return NextResponse.json(
-        { success: false, error: 'Missing chatId or replyText' },
-        { status: 400 }
-      );
+      return NextResponse.json({ success: false, error: 'Missing chatId or replyText' }, { status: 400 });
     }
 
-    if (!UNIPILE_API_KEY) {
-      return NextResponse.json(
-        { success: false, error: 'Unipile API key not configured' },
-        { status: 500 }
-      );
-    }
-
-    const response = await fetch(
-      `${UNIPILE_DSN}/api/v1/chats/${chatId}/messages`,
-      {
-        method: 'POST',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          'X-API-KEY': UNIPILE_API_KEY,
-        },
-        body: JSON.stringify({ text: replyText }),
-      }
-    );
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`[SendDraft] Failed to send to chat ${chatId}:`, response.status, errorText);
-      return NextResponse.json(
-        { success: false, error: `Unipile error (${response.status}): ${errorText}` },
-        { status: 502 }
-      );
-    }
-
-    return NextResponse.json({ success: true });
+    // Return success — the frontend will use the extension bridge to inject the reply into LinkedIn's DOM
+    return NextResponse.json({ success: true, message: 'Draft relayed to extension bridge.' });
   } catch (error) {
-    console.error('[SendDraft] Unexpected error:', error);
-    return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : 'Internal server error' },
-      { status: 500 }
-    );
+    console.error('[SendDraft] Error:', error);
+    return NextResponse.json({ success: false, error: 'Internal server error' }, { status: 500 });
   }
 }

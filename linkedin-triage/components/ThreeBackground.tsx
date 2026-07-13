@@ -71,10 +71,12 @@ function ParticleNetwork({ mouseRef }: { mouseRef: React.MutableRefObject<THREE.
     const spread = 12;
     const positions = new Float32Array(count * 3);
 
+    let seed = 42;
+    const rng = () => { seed = (seed * 16807 + 0) % 2147483647; return (seed - 1) / 2147483646; };
     for (let i = 0; i < count; i++) {
-      positions[i * 3] = (Math.random() - 0.5) * spread;
-      positions[i * 3 + 1] = (Math.random() - 0.5) * spread;
-      positions[i * 3 + 2] = (Math.random() - 0.5) * spread;
+      positions[i * 3] = (rng() - 0.5) * spread;
+      positions[i * 3 + 1] = (rng() - 0.5) * spread;
+      positions[i * 3 + 2] = (rng() - 0.5) * spread;
     }
 
     // Create connections between nearby particles

@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary-50: #f0f9ff;
+  --color-primary-100: #e0f2fe;
+  --color-primary-500: #0ea5e9;
+  --color-primary-600: #0284c7;
+  --color-primary-700: #0369a1;
+  --color-primary-900: #0c4a6e;
+  --font-family-sans: 'Kanit', 'Inter', 'system-ui', sans-serif;
+  --color-accent-purple: #a78bfa;
+  --color-accent-neon: #c4b5fd;
+  --color-dark-bg: #0C0C0C;
+  --color-dark-card: #1A1A1A;
+  --color-text-bright: #D7E2EA;
+  --color-text-muted: #8A98A6;
+}
+
+@layer base {
+  body {
+    @apply bg-[#0C0C0C] text-[#D7E2EA] font-sans antialiased selection:bg-[#a78bfa]/30 selection:text-[#D7E2EA];
+  }
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+@layer utilities {
+  .glass-card {
+    @apply bg-[#1A1A1A]/90 backdrop-blur-md border border-white/10 shadow-lg shadow-black/20 rounded-2xl;
+  }
+
+  .metallic-text {
+    background: linear-gradient(180deg, #646973 0%, #BBCCD7 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .metallic-text-bright {
+    background: linear-gradient(180deg, #8A98A6 0%, #D7E2EA 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .glow-border {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 0 20px rgba(167, 139, 250, 0.05), inset 0 0 20px rgba(255, 255, 255, 0.02);
+  }
+
+  .hero-overlay {
+    background: radial-gradient(ellipse at center, rgba(12, 12, 12, 0.3) 0%, rgba(12, 12, 12, 0.85) 70%, rgba(12, 12, 12, 0.95) 100%);
+  }
+}

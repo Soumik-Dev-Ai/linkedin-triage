@@ -1,25 +1,40 @@
-// This script is injected into the Next.js Dashboard website (localhost or Vercel).
-// It acts as a bridge between the website's DOM and the Chrome Extension's background script.
+console.log('[AI Triage Bridge] Injected into Dashboard.');
 
-console.log('LinkedIn Triage Bridge Script injected.');
+function isOriginAllowed(origin: string): boolean {
+  if (!origin) return false;
+  try {
+    const url = new URL(origin);
+    if (url.origin === 'http://localhost' || url.origin.startsWith('http://localhost:')) return true;
+    if (url.hostname.endsWith('.vercel.app')) return true;
+  } catch { }
+  return false;
+}
 
-// 1. Listen for the Website dispatching the START_SCRAPE command
-window.addEventListener('START_SCRAPE', () => {
-  console.log('[Bridge] Received START_SCRAPE from Website. Forwarding to Extension Background...');
-  
-  chrome.runtime.sendMessage({ type: 'TRIGGER_LINKEDIN_SCRAPE' }, (response) => {
+window.addEventListener('EXTENSION_SCRAPE_REQUEST', (event: Event) => {
+  if (!isOriginAllowed((event as CustomEvent).detail?.origin || window.location.origin)) {
+    console.warn('[Bridge] Ignoring request from untrusted origin');
+    return;
+  }
+
+  chrome.runtime.sendMessage({ type: 'EXTENSION_SCRAPE_REQUEST' }, (response) => {
     if (chrome.runtime.lastError) {
-      console.error('[Bridge] Extension Error:', chrome.runtime.lastError);
-      window.dispatchEvent(new CustomEvent('SCRAPE_RESULTS', { 
-        detail: { success: false, error: chrome.runtime.lastError.message } 
+      window.dispatchEvent(new CustomEvent('EXTENSION_SCRAPE_RESULT', {
+        detail: { success: false, error: chrome.runtime.lastError.message, messages: [] }
       }));
       return;
     }
-
-    if (response) {
-      console.log('[Bridge] Received response from Background. Sending back to Website...');
-      // 2. Dispatch the result back to the Website's React state
-      window.dispatchEvent(new CustomEvent('SCRAPE_RESULTS', { detail: response }));
-    }
+    window.dispatchEvent(new CustomEvent('EXTENSION_SCRAPE_RESULT', { detail: response }));
   });
 });
+
+window.addEventListener('SEND_REPLY', (event: Event) => {
+  const detail = (event as CustomEvent).detail;
+  if (!detail || !detail.chatId || !detail.draftReply) return;
+  if (!isOriginAllowed(detail.origin || window.location.origin)) return;
+
+  chrome.runtime.sendMessage({ type: 'SEND_REPLY', chatId: detail.chatId, draftReply: detail.draftReply }, (response) => {
+    window.dispatchEvent(new CustomEvent('SEND_REPLY_RESULT', { detail: response }));
+  });
+});
+
+window.dispatchEvent(new CustomEvent('EXTENSION_BRIDGE_READY', { detail: { ready: true } }));

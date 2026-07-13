@@ -3,11 +3,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Shield, Wifi, WifiOff, ExternalLink, X, Loader2, RefreshCw } from 'lucide-react';
+import { Shield, Wifi, WifiOff, ExternalLink, X, Loader2 } from 'lucide-react';
 import Sidebar from '@/components/Sidebar';
 import ActivityLog from '@/components/ActivityLog';
 import ChatModal from '@/components/ChatModal';
-import type { ActivityEntry } from '@/lib/types';
+import type { ActivityEntry, LLMClassification } from '@/lib/types';
 import AnimatedHeading from '@/components/AnimatedHeading';
 
 /* ─── Lazy-load Three.js (SSR-incompatible) ─── */
@@ -18,11 +18,37 @@ const ThreeBackground = dynamic(() => import('@/components/ThreeBackground'), {
 
 /* ─── Polling Interval (ms) ─── */
 const POLL_INTERVAL = 30_000;
-const AUTH_POLL_INTERVAL = 2_000; // Poll auth status every 2s
+
+type ScrapeMessage = Record<string, unknown>;
+
+/* ─── Extension Bridge Helper ─── */
+async function requestExtensionScrape(): Promise<{ success: boolean; messages: ScrapeMessage[]; error?: string }> {
+  return new Promise((resolve, reject) => {
+    const handler = (event: Event) => {
+      window.removeEventListener('EXTENSION_SCRAPE_RESULT', handler);
+      const detail = (event as CustomEvent).detail;
+      if (detail?.success) {
+        resolve(detail);
+      } else {
+        reject(new Error(detail?.error || 'Scrape failed'));
+      }
+    };
+    window.addEventListener('EXTENSION_SCRAPE_RESULT', handler);
+    window.dispatchEvent(new CustomEvent('EXTENSION_SCRAPE_REQUEST', {
+      detail: { origin: window.location.origin }
+    }));
+    setTimeout(() => {
+      window.removeEventListener('EXTENSION_SCRAPE_RESULT', handler);
+      reject(new Error('Extension scrape timed out'));
+    }, 30000);
+  });
+}
+
 
 export default function Dashboard() {
   /* ─── Core State ─── */
-  const [accountId, setAccountId] = useState<string | null>(null);
+  const [bridgeReady, setBridgeReady] = useState(false);
+  const [isScraping, setIsScraping] = useState(false);
   const [activityLog, setActivityLog] = useState<ActivityEntry[]>([]);
   const [activeCategory, setActiveCategory] = useState<string>('ALL');
   const [selectedEntry, setSelectedEntry] = useState<ActivityEntry | null>(null);
@@ -41,7 +67,7 @@ export default function Dashboard() {
   const [toast, setToast] = useState<string | null>(null);
 
   // Safe mode & terminal logs (must be declared before handleSendDraft)
-  const [safeMode, setSafeMode] = useState(true); // Default to true for safety
+  const [safeMode, setSafeMode] = useState(true);
   const [terminalLogs, setTerminalLogs] = useState<string[]>(['[System] Awaiting LinkedIn connection...']);
 
   const addTerminalLog = useCallback((message: string) => {
@@ -51,28 +77,18 @@ export default function Dashboard() {
 
   // Handler to send a draft reply
   const handleSendDraft = useCallback(async (id: string, chatId: string, draftReply: string) => {
-    try {
-      const res = await fetch('/api/send-draft', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chatId, replyText: draftReply }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to send draft');
-      // Update activity log: mark as sent and change action label
-      setActivityLog((prev) =>
-        prev.map((e) => (e.id === id ? { ...e, sent: true, action: `SENT: ${draftReply}` } : e))
-      );
-      setToast('Message sent successfully!');
-      addTerminalLog('[System] Draft sent and recorded.');
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error sending draft';
-      setToast(`Error: ${msg}`);
-      addTerminalLog(`[Error] ${msg}`);
+    if (!safeMode) {
+      window.dispatchEvent(new CustomEvent('SEND_REPLY', {
+        detail: { chatId, draftReply, origin: window.location.origin }
+      }));
     }
-    // Auto-hide toast after 3 seconds
+    setActivityLog((prev) =>
+      prev.map((e) => (e.id === id ? { ...e, sent: true, action: `SENT: ${draftReply}` } : e))
+    );
+    setToast('Message sent successfully!');
+    addTerminalLog('[System] Draft sent and recorded.');
     setTimeout(() => setToast(null), 3000);
-  }, [addTerminalLog]);
+  }, [safeMode, addTerminalLog]);
 
   // Toast UI element (placed near top of return)
   const toastElement = toast ? (
@@ -84,229 +100,64 @@ export default function Dashboard() {
   /* ─── UI State ─── */
   const [isConnecting, setIsConnecting] = useState(false);
   const [isKilling, setIsKilling] = useState(false);
-  const [showConnectModal, setShowConnectModal] = useState(false);
-  const [manualAccountId, setManualAccountId] = useState('');
-  const [connectStep, setConnectStep] = useState<'idle' | 'opening' | 'waiting' | 'polling'>('idle');
+
 
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const authPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isProcessingRef = useRef(false);
 
-  /* ─── Restore session from sessionStorage on mount ─── */
+  /* ─── Detect extension bridge on mount ─── */
   useEffect(() => {
-    try {
-      // Check if we're returning from auth-success redirect
-      const authSession = sessionStorage.getItem('triage_auth_session');
-      if (authSession) {
-        sessionStorage.removeItem('triage_auth_session');
-        // Instead of polling the webhook (which can fail on localhost),
-        // we just fetch the accounts since they just connected one!
-        // We use setTimeout to ensure handleUseExistingAccount is ready
-        setTimeout(() => handleUseExistingAccount(), 100);
-        return;
-      }
-
-      const stored = sessionStorage.getItem('triage_account_id');
-      if (stored) {
-        setAccountId(stored);
-      }
-    } catch {
-      // sessionStorage may not be available
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  /* ─── Persist accountId to sessionStorage ─── */
-  useEffect(() => {
-    try {
-      if (accountId) {
-        sessionStorage.setItem('triage_account_id', accountId);
-      } else {
-        sessionStorage.removeItem('triage_account_id');
-      }
-    } catch {
-      // sessionStorage may not be available
-    }
-  }, [accountId]);
-
-  /* ─── Auth Polling: Check if Unipile webhook has delivered account_id ─── */
-  const startAuthPolling = useCallback((sessionToken: string) => {
-    setIsConnecting(true);
-    setConnectStep('polling');
-
-    let attempts = 0;
-    const maxAttempts = 150; // 5 minutes at 2s intervals
-
-    const poll = async () => {
-      attempts++;
-      if (attempts > maxAttempts) {
-        clearInterval(authPollRef.current!);
-        authPollRef.current = null;
-        setIsConnecting(false);
-        setConnectStep('idle');
-        setErrorMessage('Authentication timed out. Please try again.');
-        return;
-      }
-
-      try {
-        const res = await fetch('/api/auth', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'poll-status', sessionToken }),
-        });
-        const data = await res.json();
-
-        if (data.status === 'connected' && data.accountId) {
-          // Success!
-          clearInterval(authPollRef.current!);
-          authPollRef.current = null;
-          setAccountId(data.accountId);
-          setShowConnectModal(false);
-          setIsConnecting(false);
-          setConnectStep('idle');
-          setErrorMessage(null);
-        } else if (data.status === 'expired') {
-          clearInterval(authPollRef.current!);
-          authPollRef.current = null;
-          setIsConnecting(false);
-          setConnectStep('idle');
-          setErrorMessage('Session expired. Please try again.');
-        }
-        // If 'pending', keep polling
-      } catch {
-        // Network error — keep trying
-      }
+    const handleBridgeReady = () => {
+      setBridgeReady(true);
+      addTerminalLog('[System] Extension bridge detected.');
     };
-
-    // Poll immediately, then every 2s
-    poll();
-    authPollRef.current = setInterval(poll, AUTH_POLL_INTERVAL);
-  }, []);
-
-  /* ─── Cleanup auth polling on unmount ─── */
-  useEffect(() => {
-    return () => {
-      if (authPollRef.current) {
-        clearInterval(authPollRef.current);
-        authPollRef.current = null;
-      }
-    };
-  }, []);
-
-  /* ─── Create New Unipile Auth Session ─── */
-  const handleCreateAuth = useCallback(async () => {
-    setIsConnecting(true);
-    setErrorMessage(null);
-    addTerminalLog('[Network] Requesting new secure auth session...');
-
-    try {
-      const response = await fetch('/api/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'create-auth' }),
-      });
-
-      const data = await response.json();
-
-      if (data.success && data.authUrl) {
-        addTerminalLog('[Network] Received auth URL, opening secure popup...');
-        
-        // Open the Hosted Auth link in a popup window
-        const width = 500;
-        const height = 700;
-        const left = window.screenX + (window.outerWidth - width) / 2;
-        const top = window.screenY + (window.outerHeight - height) / 2;
-        window.open(
-          data.authUrl,
-          'LinkedIn Triage Auth',
-          `width=${width},height=${height},left=${left},top=${top}`
-        );
-
-        // Start polling to check if an account was successfully connected
-        if (authPollRef.current) clearInterval(authPollRef.current);
-        authPollRef.current = setInterval(() => {
-          handleUseExistingAccount();
-        }, 3000);
-      } else {
-        setErrorMessage(data.error || 'Failed to create auth session');
-      }
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Auth failure');
-    } finally {
-      setIsConnecting(false);
-    }
+    window.addEventListener('EXTENSION_BRIDGE_READY', handleBridgeReady);
+    return () => window.removeEventListener('EXTENSION_BRIDGE_READY', handleBridgeReady);
   }, [addTerminalLog]);
 
-  /* ─── Showcase Mode Auth (Bypasses Extension) ─── */
-  const handleUseExistingAccount = useCallback(async () => {
-    // Clear any pending auth polling
-    if (authPollRef.current) {
-      clearInterval(authPollRef.current);
-      authPollRef.current = null;
-    }
-
+  /* ─── Connect to Extension Bridge ─── */
+  const handleStartTriage = useCallback(async () => {
     setIsConnecting(true);
     setErrorMessage(null);
-    addTerminalLog('[Network] Connecting to backend services...');
+    addTerminalLog('[System] Requesting data from extension bridge...');
 
-    try {
-      const response = await fetch('/api/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'list-accounts' }),
-      });
-
-      const data = await response.json();
-
-      if (data.success && data.accounts?.length > 0) {
-        // Auto-connect to the first LinkedIn account found (or the mock account)
-        const account = data.accounts[0];
-        setAccountId(account.id || account.account_id);
-        setShowConnectModal(false);
-        setErrorMessage(null);
-        addTerminalLog(`[System] Successfully authenticated as: ${account.name || 'User'}`);
-      } else if (data.success && data.accounts?.length === 0) {
-        // We only show error if they try to use an existing account and it fails
-        // setErrorMessage('No LinkedIn accounts found. Please connect one first.');
-      } else {
-        setErrorMessage(data.error || 'Failed to fetch accounts');
-      }
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Failed to fetch accounts');
-    } finally {
+    if (!bridgeReady) {
+      setErrorMessage('Extension bridge not detected. Please install the AI Triage Bridge extension and refresh.');
       setIsConnecting(false);
+      return;
     }
-  }, [addTerminalLog]);
 
-  /* ─── Listen for popup postMessage (backup mechanism) ─── */
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      if (event.data?.type === 'UNIPILE_AUTH_COMPLETE') {
-        // Instead of relying on a webhook that might fail on localhost,
-        // just fetch the connected accounts directly since they just linked it!
-        handleUseExistingAccount();
-      }
-    };
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, [handleUseExistingAccount]);
+    setIsConnecting(false);
+    setIsPolling(true);
+    addTerminalLog('[System] Extension bridge active. Starting message triage...');
+    // The polling lifecycle effect handles calling processLoop
+  }, [bridgeReady, addTerminalLog]);
 
-
-
-  /* ─── Process Loop: Fetch, classify, reply ─── */
+  /* ─── Process Loop: Scrape via extension, classify, reply ─── */
   const processLoop = useCallback(async () => {
-    if (!accountId || isProcessingRef.current) return;
-
+    if (isProcessingRef.current) return;
     isProcessingRef.current = true;
+    setIsScraping(true);
     setErrorMessage(null);
-    addTerminalLog(safeMode ? '[System] Initiating process loop (SAFE MODE)...' : '[System] Initiating process loop (LIVE MODE)...');
-    addTerminalLog('[Network] Fetching unread messages from secure pipeline...');
+    addTerminalLog(safeMode ? '[System] Scraping messages via extension (SAFE MODE)...' : '[System] Scraping messages via extension (LIVE MODE)...');
 
     try {
+      addTerminalLog('[Network] Requesting scrape from extension bridge...');
+      const scrapeResult = await requestExtensionScrape();
+
+      if (!scrapeResult.success || !scrapeResult.messages || scrapeResult.messages.length === 0) {
+        addTerminalLog('[System] No messages found on LinkedIn.');
+        isProcessingRef.current = false;
+        setIsScraping(false);
+        return;
+      }
+
+      addTerminalLog(`[Network] Found ${scrapeResult.messages.length} conversations. Sending to LLM cascade...`);
+
       const response = await fetch('/api/process-loop', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ account_id: accountId, safeMode }),
+        body: JSON.stringify({ messages: scrapeResult.messages, safeMode }),
       });
 
       const data = await response.json();
@@ -314,11 +165,12 @@ export default function Dashboard() {
       if (!response.ok) {
         addTerminalLog(`[Error] API returned status ${response.status}`);
         setErrorMessage(data.error || `API error (${response.status})`);
+        isProcessingRef.current = false;
+        setIsScraping(false);
         return;
       }
 
       if (data.error && data.entries?.length === 0) {
-        // Non-fatal error (e.g., rate limited)
         addTerminalLog(`[Warning] ${data.error}`);
         setErrorMessage(data.error);
       }
@@ -332,7 +184,6 @@ export default function Dashboard() {
             const idx = updated.findIndex(p => p.chatId === newEntry.chatId);
             if (idx >= 0) {
               const oldEntry = updated[idx];
-              // Only update if it hasn't been sent manually by the user, OR if a brand new unread message arrived in the same chat
               if (!oldEntry.sent || oldEntry.messagePreview !== newEntry.messagePreview) {
                 updated[idx] = newEntry;
               }
@@ -362,181 +213,41 @@ export default function Dashboard() {
       );
     } finally {
       isProcessingRef.current = false;
+      setIsScraping(false);
     }
-  }, [accountId, safeMode, addTerminalLog]);
+  }, [safeMode, addTerminalLog]);
 
   /* ─── Polling Lifecycle ─── */
   useEffect(() => {
-    if (accountId) {
-      // Run immediately on connect
-      processLoop();
-
-      // Then every 30 seconds
+    if (isPolling && bridgeReady) {
+      queueMicrotask(() => processLoop());
       pollIntervalRef.current = setInterval(processLoop, POLL_INTERVAL);
-      setIsPolling(true);
-
       return () => {
         if (pollIntervalRef.current) {
           clearInterval(pollIntervalRef.current);
           pollIntervalRef.current = null;
         }
-        setIsPolling(false);
       };
     } else {
-      setIsPolling(false);
-    }
-  }, [accountId, processLoop]);
-
-  /* ─── Tab close cleanup ─── */
-  useEffect(() => {
-    const handleBeforeUnload = () => {
-      // Attempt to kill session on tab close
-      if (accountId) {
-        navigator.sendBeacon(
-          '/api/kill-session',
-          JSON.stringify({ account_id: accountId })
-        );
-      }
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [accountId]);
-
-  /* ─── Connect Account ─── */
-  const handleConnect = async () => {
-    setShowConnectModal(true);
-  };
-
-  const handleConnectViaAuth = async () => {
-    setIsConnecting(true);
-    setConnectStep('opening');
-    setErrorMessage(null);
-
-    try {
-      const response = await fetch('/api/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'create-auth' }),
-      });
-
-      const data = await response.json();
-
-      if (data.success && data.authUrl && data.sessionToken) {
-        setConnectStep('waiting');
-
-        // Open in a new tab (more reliable than popup on most browsers)
-        const authWindow = window.open(data.authUrl, '_blank');
-
-        if (!authWindow) {
-          // Popup blocked — redirect in same window instead
-          // Store session token so we can resume when they return
-          sessionStorage.setItem('triage_auth_session', data.sessionToken);
-          window.location.href = data.authUrl;
-          return;
-        }
-
-        // Start polling for webhook completion
-        startAuthPolling(data.sessionToken);
-      } else {
-        setErrorMessage(data.error || 'Failed to create auth link');
-        setIsConnecting(false);
-        setConnectStep('idle');
-      }
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Connection failed');
-      setIsConnecting(false);
-      setConnectStep('idle');
-    }
-  };
-
-  const handleManualConnect = async () => {
-    if (!manualAccountId.trim()) return;
-
-    setIsConnecting(true);
-    setErrorMessage(null);
-
-    try {
-      const response = await fetch('/api/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'set-account',
-          accountId: manualAccountId.trim(),
-        }),
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        setAccountId(data.accountId);
-        setShowConnectModal(false);
-        setManualAccountId('');
-      } else {
-        setErrorMessage(data.error || 'Invalid account ID');
-      }
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Connection failed');
-    } finally {
-      setIsConnecting(false);
-    }
-  };
-
-  /* ─── Kill Session ─── */
-  const handleKillSession = async () => {
-    if (!accountId) return;
-
-    setIsKilling(true);
-    setErrorMessage(null);
-
-    try {
-      const response = await fetch('/api/kill-session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ account_id: accountId }),
-      });
-
-      const data = await response.json();
-
-      if (!data.success) {
-        console.error('[Dashboard] Kill session failed:', data.error);
-        // Still clear local state even if API fails
-      }
-    } catch (error) {
-      console.error('[Dashboard] Kill session error:', error);
-    } finally {
-      // Always flush state
       if (pollIntervalRef.current) {
         clearInterval(pollIntervalRef.current);
         pollIntervalRef.current = null;
       }
-
-      setAccountId(null);
-      setActivityLog([]);
-      setIsPolling(false);
-      setLastPollTime(null);
-      setErrorMessage(null);
-      setIsKilling(false);
-
-      // Flush sessionStorage
-      try {
-        sessionStorage.removeItem('triage_account_id');
-        sessionStorage.clear();
-      } catch {
-        // ignore
-      }
     }
-  };
+  }, [isPolling, bridgeReady, processLoop]);
 
-  /* ─── Cancel Auth ─── */
-  const handleCancelAuth = () => {
-    if (authPollRef.current) {
-      clearInterval(authPollRef.current);
-      authPollRef.current = null;
+  /* ─── Kill Session ─── */
+  const handleKillSession = async () => {
+    setIsKilling(true);
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
     }
-    setIsConnecting(false);
-    setConnectStep('idle');
+    setActivityLog([]);
+    setIsPolling(false);
+    setLastPollTime(null);
     setErrorMessage(null);
+    setIsKilling(false);
   };
 
   /* ─── Mouse Movement Tracker for Spotlight ─── */
@@ -558,10 +269,10 @@ export default function Dashboard() {
       <div className="relative z-10 min-h-screen flex">
         {/* Sidebar */}
         <Sidebar
-          accountId={accountId}
+          accountId={isPolling ? 'connected' : null}
           isPolling={isPolling}
           activityLog={activityLog}
-          onConnect={handleCreateAuth}
+          onConnect={handleStartTriage}
           onKillSession={handleKillSession}
           isConnecting={isConnecting}
           isKilling={isKilling}
@@ -602,10 +313,11 @@ export default function Dashboard() {
             </div>
 
             <div className="flex items-center gap-2">
-              {accountId ? (
+              {isPolling ? (
                 <div className="flex items-center gap-1.5 text-emerald-500/80">
-                  <Wifi size={12} className="animate-pulse" />
+                  <Wifi size={12} className={isScraping ? 'animate-pulse' : ''} />
                   <span className="text-[10px] tracking-header font-bold" style={{ textShadow: '0 0 8px rgba(16,185,129,0.5)' }}>CONNECTED</span>
+                  {isScraping && <span className="text-[10px] text-zinc-400 ml-1">SCANNING</span>}
                 </div>
               ) : (
                 <div className="flex items-center gap-1.5 text-zinc-600">
@@ -619,7 +331,7 @@ export default function Dashboard() {
           {/* Main Content Area */}
           {toastElement}
           
-          {accountId ? (
+          {isPolling ? (
             <ActivityLog 
               entries={activeCategory === 'ALL' ? activityLog : activityLog.filter(e => e.category === activeCategory)} 
               isPolling={isPolling} 
@@ -628,7 +340,7 @@ export default function Dashboard() {
               safeMode={safeMode}
               isDeveloper={isDeveloper}
               onCategoryChange={(id, newCategory) => {
-                setActivityLog(prev => prev.map(e => e.id === id ? { ...e, category: newCategory as any } : e));
+                setActivityLog(prev => prev.map(e => e.id === id ? { ...e, category: newCategory as LLMClassification['category'] } : e));
               }}
             />
           ) : (
@@ -648,7 +360,7 @@ export default function Dashboard() {
                 <div className="relative inline-block group mt-8">
                   <div className="absolute inset-0 bg-white/20 blur-2xl rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
                   <button
-                    onClick={handleUseExistingAccount}
+                    onClick={handleStartTriage}
                     disabled={isConnecting}
                     className="relative bg-white text-black px-12 py-5 rounded-2xl text-xs font-bold tracking-[0.2em] uppercase hover:scale-105 hover:bg-zinc-100 active:scale-95 transition-all shadow-[0_0_40px_rgba(255,255,255,0.1)] flex items-center gap-4 disabled:opacity-50 disabled:cursor-not-allowed mx-auto"
                   >

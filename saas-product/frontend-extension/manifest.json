@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "LinkedIn AI Triage",
+  "name": "AI Triage Bridge",
   "version": "1.0.0",
-  "description": "Auto-triage LinkedIn messages.",
+  "description": "Secure data bridge between LinkedIn and the AI Triage Dashboard.",
   "action": {},
   "background": {
     "service_worker": "src/background/index.ts",
@@ -20,21 +20,13 @@
       "run_at": "document_end"
     }
   ],
-  "permissions": [
-    "storage",
-    "activeTab",
-    "scripting",
-    "tabs"
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": ["index.html"],
-      "matches": ["<all_urls>"]
-    }
-  ],
+  "permissions": ["storage", "activeTab", "scripting", "tabs"],
   "host_permissions": [
     "https://www.linkedin.com/*",
     "http://localhost/*",
     "https://*.vercel.app/*"
-  ]
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
 }

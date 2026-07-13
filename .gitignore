@@ -1,0 +1,7 @@
+# Decoy/honeypot project - standalone, not a submodule
+public-showcase/
+
+# Environment files
+.env
+.env.local
+.env.production

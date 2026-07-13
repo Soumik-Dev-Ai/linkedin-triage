@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Shield, Wifi, WifiOff, X, RefreshCw } from 'lucide-react';
+import { AnimatePresence } from 'framer-motion';
+import { Shield } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import ActivityLog from './components/ActivityLog';
 import ChatModal from './components/ChatModal';
@@ -11,11 +11,11 @@ export default function App() {
   const [activityLog, setActivityLog] = useState<ActivityEntry[]>([]);
   const [activeCategory, setActiveCategory] = useState<string>('ALL');
   const [selectedEntry, setSelectedEntry] = useState<ActivityEntry | null>(null);
-  const [isPolling, setIsPolling] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isPolling] = useState(false);
+  const [errorMessage] = useState<string | null>(null);
   const [isDeveloper, setIsDeveloper] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const [safeMode, setSafeMode] = useState(true);
+  const [safeMode] = useState(true);
   const [terminalLogs, setTerminalLogs] = useState<string[]>(['[System] Extension UI loaded. Waiting for LinkedIn tab...']);
 
   const addTerminalLog = useCallback((message: string) => {
@@ -69,9 +69,7 @@ export default function App() {
         <Sidebar
           accountId="local-extension"
           isPolling={isPolling}
-          onConnect={() => {}}
           onKillSession={() => {}}
-          isConnecting={false}
           isKilling={false}
           lastPollTime={new Date().toLocaleTimeString()}
           errorMessage={errorMessage}

@@ -2,7 +2,20 @@ import { NextResponse } from 'next/server';
 import fs from 'fs/promises';
 import path from 'path';
 
+function checkApiKey(request: Request): NextResponse | null {
+  const apiKey = request.headers.get('x-api-key');
+  const expected = process.env.API_SECRET;
+  if (!expected) return null;
+  if (apiKey !== expected) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  return null;
+}
+
 export async function POST(req: Request) {
+  const authCheck = checkApiKey(req);
+  if (authCheck) return authCheck;
+
   try {
     const { jsonlContent } = await req.json();
 

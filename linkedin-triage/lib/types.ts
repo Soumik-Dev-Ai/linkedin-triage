@@ -33,30 +33,17 @@ export interface AuthResponse {
   error?: string;
 }
 
-export interface UnipileChat {
-  id: string;
-  account_id: string;
-  attendees: Array<{
-    id: string;
-    display_name?: string;
-    name?: string;
-  }>;
-  last_message?: {
-    text?: string;
-    is_sender?: number;
-    sender?: {
-      display_name?: string;
-      name?: string;
-    };
-  };
-  unread_count?: number;
-  provider?: string;
+export interface ScrapedChat {
+  chatId: string;
+  senderName: string;
+  text: string;
+  messages: { isMe: boolean; text: string }[];
 }
 
-export interface UnipileChatsResponse {
-  object: string;
-  items: UnipileChat[];
-  cursor?: string;
+export interface ScrapeResult {
+  success: boolean;
+  messages: ScrapedChat[];
+  error?: string;
 }
 
 export interface LLMClassification {

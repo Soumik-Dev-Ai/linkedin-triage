@@ -204,7 +204,7 @@ export default function Sidebar({
               ) : (
                 <>
                   <Zap size={14} className="text-emerald-400" />
-                  CONNECT YOUR ACCOUNT
+                  START TRIAGE
                 </>
               )}
             </button>
@@ -466,7 +466,7 @@ export default function Sidebar({
             ) : (
               <>
                 <ShieldOff size={13} />
-                DELETE ALL DETAILS
+                STOP TRIAGE
               </>
             )}
           </button>
@@ -479,8 +479,7 @@ export default function Sidebar({
                 exit={{ opacity: 0, height: 0 }}
                 className="text-[10px] text-zinc-500 text-center leading-relaxed px-2"
               >
-                This will permanently delete the connected account from Unipile
-                and flush all session data.
+                This will stop the triage loop and clear all session data.
               </motion.p>
             )}
           </AnimatePresence>

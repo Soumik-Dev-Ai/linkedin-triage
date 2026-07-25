@@ -16,16 +16,14 @@
       "run_at": "document_end"
     },
     {
-      "matches": ["http://localhost/*", "https://linkedin-triage.vercel.app/*", "https://aitriage.vercel.app/*", "https://*.vercel.app/*"],
+      "matches": ["http://localhost/*", "https://linkedin-triage.vercel.app/*", "https://aitriage.vercel.app/*"],
       "js": ["scripts/content-dashboard.js"],
       "run_at": "document_end"
     }
   ],
-  "permissions": ["activeTab", "scripting", "tabs"],
+  "permissions": ["activeTab", "tabs"],
   "host_permissions": [
     "*://*.linkedin.com/*",
-    "http://localhost/*",
-    "https://*.vercel.app/*",
     "https://linkedin-triage.vercel.app/*",
     "https://aitriage.vercel.app/*"
   ],

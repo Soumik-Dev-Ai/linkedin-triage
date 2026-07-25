@@ -142,6 +142,10 @@ export default function Dashboard() {
       addTerminalLog('[System] Extension bridge detected.');
     };
     window.addEventListener('EXTENSION_BRIDGE_READY', handleBridgeReady);
+
+    // Send a PING so the bridge responds even if it loaded before React mounted
+    window.dispatchEvent(new CustomEvent('EXTENSION_BRIDGE_PING'));
+
     return () => window.removeEventListener('EXTENSION_BRIDGE_READY', handleBridgeReady);
   }, [addTerminalLog]);
 

@@ -84,8 +84,13 @@ window.addEventListener('SEND_REPLY', function (event) {
 });
 
 // ────────────────────────────────────────────────────────────────────
-// 3. READY SIGNAL
-//    When the bridge script loads, it notifies the Dashboard React
-//    app that the extension bridge is active and ready to use.
+// 3. READY SIGNAL — Two-Way Handshake
+//    Fire immediately for fast loads, AND listen for a PING from the
+//    React app so we can re-fire if the app loaded after this script.
 // ────────────────────────────────────────────────────────────────────
 window.dispatchEvent(new CustomEvent('EXTENSION_BRIDGE_READY', { detail: { ready: true } }));
+
+window.addEventListener('EXTENSION_BRIDGE_PING', function () {
+  console.log('[AI Triage Bridge] Received PING from dashboard — responding with READY.');
+  window.dispatchEvent(new CustomEvent('EXTENSION_BRIDGE_READY', { detail: { ready: true } }));
+});

@@ -2,7 +2,7 @@
 
 // ── On extension install: open the Privacy & Transparency Website ──
 chrome.runtime.onInstalled.addListener(function () {
-  chrome.tabs.create({ url:     "https://linkedin-triage.vercel.app" });
+  chrome.tabs.create({ url: "https://aitriage.vercel.app" });
 });
 
 // ── On extension icon click: open the AI Triage Dashboard ──

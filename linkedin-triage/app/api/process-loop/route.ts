@@ -8,6 +8,17 @@ import type {
   LLMClassification,
 } from '@/lib/types';
 
+/* ─── Safe JSON Parser (strips markdown fences LLMs sometimes wrap responses in) ─── */
+function safeJsonParse(text: string): Record<string, unknown> | null {
+  try {
+    // Strip markdown code fences if present (e.g. ```json ... ```)
+    const cleaned = text.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+    const result = JSON.parse(cleaned);
+    return result && typeof result === 'object' ? result : null;
+  } catch {
+    return null;
+  }
+}
 
 function checkApiKey(request: NextRequest): NextResponse | null {
   const apiKey = request.headers.get('x-api-key');
@@ -272,8 +283,8 @@ async function callGeminiAPI(
   const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!content) throw new Error(`${config.name}: empty response`);
 
-  const parsed = JSON.parse(content);
-  return normalizeClassifications(parsed.classifications, expectedCount);
+  const parsed = safeJsonParse(content);
+  return normalizeClassifications(parsed?.classifications, expectedCount);
 }
 
 /* ─── OpenAI-Compatible API (Groq, Cerebras, Mistral, DeepSeek, OpenAI) ─── */
@@ -312,8 +323,8 @@ async function callOpenAICompatibleAPI(
   const content = data.choices?.[0]?.message?.content;
   if (!content) throw new Error(`${config.name}: empty response`);
 
-  const parsed = JSON.parse(content);
-  return normalizeClassifications(parsed.classifications, expectedCount);
+  const parsed = safeJsonParse(content);
+  return normalizeClassifications(parsed?.classifications, expectedCount);
 }
 
 function normalizeClassifications(
@@ -325,10 +336,10 @@ function normalizeClassifications(
 
   for (let i = 0; i < expectedCount; i++) {
     const cls = classifications?.[i];
-    const category = cls?.category?.toUpperCase();
+    const rawCategory = (typeof cls?.category === 'string') ? cls.category.toUpperCase() : '';
 
     result.push({
-      category: (validCategories.includes(category || '') ? category : 'IRRELEVANT') as LLMClassification['category'],
+      category: (validCategories.includes(rawCategory) ? rawCategory : 'IRRELEVANT') as LLMClassification['category'],
       confidence: typeof cls?.confidence === 'number' ? cls.confidence : 0.5,
       reasoning: cls?.reasoning || 'Classification result',
       draftReply: cls?.draftReply || "Thanks for your message. We'll be in touch.",
@@ -373,22 +384,24 @@ export async function POST(request: NextRequest): Promise<NextResponse<ProcessLo
 
     // Build messages to classify from scraped chats
     const messagesToClassify = messages.map((chat, i) => {
-      // Build context text from chat messages
-      const chatHistoryText = chat.messages.map(m =>
-        `${m.isMe ? 'Me' : chat.senderName}: ${m.text}`
+      // Build context text from chat messages (guard against missing array)
+      const chatMessages = Array.isArray(chat.messages) ? chat.messages : [];
+      const chatHistoryText = chatMessages.map(m =>
+        `${m.isMe ? 'Me' : chat.senderName}: ${m.text || ''}`
       ).join('\n');
 
       return {
         index: i,
         senderName: chat.senderName,
-        text: chatHistoryText || chat.text,
-        chatId: chat.chatId,
-        rawHistory: chat.messages,
+        text: chatHistoryText || chat.text || '',
+        chatId: chat.chatId || `unknown-${i}`,
+        rawHistory: chatMessages,
       };
     });
 
     // Filter out chats where the last message is from "Me"
     const filteredMessages = messagesToClassify.filter(msg => {
+      if (!msg.rawHistory || msg.rawHistory.length === 0) return true;
       const lastMsg = msg.rawHistory[msg.rawHistory.length - 1];
       if (lastMsg?.isMe) {
         console.log(`[ProcessLoop] Skipping chat ${msg.chatId} because the last message was sent by the user.`);
@@ -415,7 +428,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ProcessLo
         senderName: msg.senderName,
         category: classification.category,
         action: `DRAFT: ${replyText}`,
-        messagePreview: msg.text.substring(0, 100).replace(/\n/g, ' '),
+        messagePreview: (msg.text || '').substring(0, 100).replace(/\n/g, ' '),
         timestamp: new Date().toISOString(),
         chatId: msg.chatId,
         chatHistory: msg.rawHistory,

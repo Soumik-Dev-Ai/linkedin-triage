@@ -8,7 +8,7 @@ export async function POST(req: Request) {
     const devPassword = process.env.DEVELOPER_PASSWORD;
 
     if (!devEmail || !devPassword) {
-      return NextResponse.json({ error: 'Developer credentials not configured on server' }, { status: 500 });
+      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
     }
 
     if (email === devEmail && password === devPassword) {

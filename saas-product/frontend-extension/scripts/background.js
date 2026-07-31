@@ -1,8 +1,11 @@
 /// <reference types="chrome"/>
 
 // ── On extension install: open the Privacy & Transparency Website ──
-chrome.runtime.onInstalled.addListener(function () {
-  chrome.tabs.create({ url: "https://aitriage.vercel.app" });
+// Only open on fresh install, NOT on extension updates or Chrome updates.
+chrome.runtime.onInstalled.addListener(function (details) {
+  if (details.reason === 'install') {
+    chrome.tabs.create({ url: "https://aitriage.vercel.app" });
+  }
 });
 
 // ── On extension icon click: open the AI Triage Dashboard ──
@@ -42,8 +45,8 @@ async function handleScrapeRequest() {
 
     if (tabs.length > 0 && tabs[0].id) {
       linkedInTabId = tabs[0].id;
-      // Bring it to the foreground so DOM scrapers work reliably
-      await chrome.tabs.update(linkedInTabId, { active: true });
+      // We intentionally do NOT bring the tab to active: true here. 
+      // This allows the dashboard to scrape quietly in the background without ripping the user's screen away.
     } else {
       var tab = await chrome.tabs.create({ url: 'https://www.linkedin.com/messaging/' });
       linkedInTabId = tab.id;
@@ -56,6 +59,8 @@ async function handleScrapeRequest() {
       chrome.tabs.sendMessage(linkedInTabId, { type: 'EXECUTE_SCRAPE' }, function (response) {
         if (chrome.runtime.lastError) {
           resolve({ success: false, error: chrome.runtime.lastError.message, messages: [] });
+        } else if (!response) {
+          resolve({ success: false, error: 'No response from LinkedIn content script. Try refreshing the LinkedIn tab.', messages: [] });
         } else {
           resolve(response);
         }

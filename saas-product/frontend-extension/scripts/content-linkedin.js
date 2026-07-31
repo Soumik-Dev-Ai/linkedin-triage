@@ -17,28 +17,35 @@ console.log('[AI Triage LinkedIn] Content script injected into LinkedIn.');
 function scanConversations() {
   var messages = [];
 
-  var conversationNodes = document.querySelectorAll(
-    '.msg-conversation-listitem, [data-test-conversation-list-item]'
-  );
+  // ── Bulletproof Approach ──
+  // Instead of relying on fragile CSS classes for the container, we find 
+  // all the actual links to threads, which rarely change.
+  var conversationLinks = document.querySelectorAll('a[href*="/messaging/thread/"]');
 
-  conversationNodes.forEach(function (convNode, convIndex) {
+  conversationLinks.forEach(function (convLink, convIndex) {
     try {
-      var nameEl = convNode.querySelector(
-        '.msg-conversation-listitem__participant-names, [data-test-conversation-name]'
-      );
-      var snippetEl = convNode.querySelector(
-        '.msg-conversation-card__message--text, .msg-conversation-listitem__message-snippet'
-      );
+      var convNode = convLink.parentElement;
+      
+      // Look inside the link (or its immediate parent) for the name and snippet.
+      // LinkedIn usually puts names in <h3> and snippets in <p>.
+      var nameEl = convLink.querySelector('h3, .msg-conversation-listitem__participant-names, [data-test-conversation-name]') 
+                || convNode.querySelector('h3, .msg-conversation-listitem__participant-names, [data-test-conversation-name]');
+                
+      var snippetEl = convLink.querySelector('p, .msg-conversation-card__message--text, .msg-conversation-listitem__message-snippet')
+                   || convNode.querySelector('p, .msg-conversation-card__message--text, .msg-conversation-listitem__message-snippet');
 
       var senderName = (nameEl && nameEl.textContent && nameEl.textContent.trim()) || 'Unknown';
       var snippet = (snippetEl && snippetEl.textContent && snippetEl.textContent.trim()) || '';
+      
       if (!snippet) return;
 
-      // Attempt to extract a stable chat ID from the thread link URL
-      var convLink = convNode.querySelector('a[href*="/messaging/thread/"]');
-      var href = convLink && convLink.getAttribute('href');
+      var href = convLink.getAttribute('href');
       var hrefMatch = href && href.match(/thread\/([^/?]+)/);
       var chatId = hrefMatch ? hrefMatch[1] : 'conv-' + convIndex;
+
+      // Prevent duplicates in case LinkedIn renders multiple links per conversation
+      var isDuplicate = messages.some(function(m) { return m.chatId === chatId; });
+      if (isDuplicate) return;
 
       messages.push({
         chatId: chatId,

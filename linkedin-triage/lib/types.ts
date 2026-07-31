@@ -54,6 +54,7 @@ export interface LLMClassification {
 }
 
 export const CATEGORY_REPLIES: Record<string, string> = {
+  IMPORTANT: 'Thank you for your message! This has been flagged as a priority item. I will review it carefully and get back to you shortly with a detailed response.',
   CANDIDATE: 'Thank you for reaching out! We are currently reviewing your resume and qualifications. A member of our team will be contacting you soon regarding next steps.',
   SALES: 'Thank you for your message. We are currently discussing your proposal with our team and will reach out if we find a potential fit for our needs.',
   IRRELEVANT: 'Thanks for connecting! We appreciate your message. As this thread doesn\'t require further discussion, we\'ll be closing it for now. Feel free to reach out if you have specific opportunities or inquiries.',

@@ -4,7 +4,7 @@
 // Only open on fresh install, NOT on extension updates or Chrome updates.
 chrome.runtime.onInstalled.addListener(function (details) {
   if (details.reason === 'install') {
-    chrome.tabs.create({ url: "https://aitriage.vercel.app" });
+    chrome.tabs.create({ url: "https://linkedin-triage-tniu.vercel.app" });
   }
 });
 

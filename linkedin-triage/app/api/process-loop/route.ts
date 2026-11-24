@@ -9,7 +9,7 @@ import type {
 } from '@/lib/types';
 
 /* ─── Safe JSON Parser (strips markdown fences LLMs sometimes wrap responses in) ─── */
-function safeJsonParse(text: string): Record<string, unknown> | null {
+function safeJsonParse(text: string): any {
   try {
     // Strip markdown code fences if present (e.g. ```json ... ```)
     const cleaned = text.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
@@ -328,14 +328,15 @@ async function callOpenAICompatibleAPI(
 }
 
 function normalizeClassifications(
-  classifications: Array<{ category?: string; confidence?: number; reasoning?: string; draftReply?: string }> | undefined,
+  classifications: any,
   expectedCount: number
 ): LLMClassification[] {
   const validCategories = ['IMPORTANT', 'CANDIDATE', 'SALES', 'IRRELEVANT'];
   const result: LLMClassification[] = [];
+  const list = Array.isArray(classifications) ? classifications : [];
 
   for (let i = 0; i < expectedCount; i++) {
-    const cls = classifications?.[i];
+    const cls = list[i];
     const rawCategory = (typeof cls?.category === 'string') ? cls.category.toUpperCase() : '';
 
     result.push({
